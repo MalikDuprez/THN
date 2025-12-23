@@ -1,6 +1,7 @@
 // src/components/shared/index.ts
 export { default as InspirationCard } from "./InspirationCard";
 export { default as InspirationModal } from "./InspirationModal";
+export { default as BookingModal } from "./BookingModal";
 export { default as CoiffeurCard } from "./CoiffeurCard";
 export { default as BookingCard } from "./BookingCard";
 export { default as ServiceCard } from "./ServiceCard";

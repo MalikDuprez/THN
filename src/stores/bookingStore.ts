@@ -1,145 +1,192 @@
-// stores/bookingStore.ts
+// src/stores/bookingStore.ts
 import { create } from "zustand";
+import { createBooking, getClientBookings, cancelBooking as apiCancelBooking, confirmPayment } from "@/api/bookings";
+import type { BookingWithDetails, BookingLocation, BookingStatus } from "@/types/database";
 
-export type BookingStatus =
-  | "pending"            // En attente de confirmation
-  | "confirmed"          // Confirmé (À venir)
-  | "hairdresser_coming" // Coiffeur en route (En cours)
-  | "in_progress"        // Prestation en cours (En cours)
-  | "completed"          // Terminé (Passées)
-  | "cancelled";         // Annulé (Passées)
+// ============ TYPES ============
 
-export type BookingLocation = "salon" | "domicile";
-
-export interface BookingItem {
-  id: string;
-  inspiration: {
-    id: string;
-    title: string;
-    image: string;
-    category: string;
-    duration: string;
-    price: number;
-  };
+export interface BookingDraft {
   coiffeur: {
     id: string;
-    name: string;
-    salon: string;
-    image: string;
+    display_name: string;
+    avatar_url: string | null;
     rating: number;
-    phone?: string;
+    salon_name?: string;
   };
-  date: string;           // Format ISO pour tri
-  dateFormatted: string;  // Format affichage "15 Jan 2025"
-  time: string;           // "14:30"
+  service: {
+    id: string;
+    name: string;
+    price_cents: number;
+    duration_minutes: number;
+  };
   location: BookingLocation;
-  address?: string;       // Adresse si domicile, ou adresse du salon
-  serviceFee?: number;    // Frais de déplacement si domicile
-  status: BookingStatus;
-  rated?: boolean;        // A été noté ?
-  createdAt: Date;
-  updatedAt: Date;
+  home_fee_cents: number;
+  date: string;
+  time: string;
+  start_at?: string;
+  address?: {
+    address_line: string;
+    city: string;
+    postal_code?: string;
+  };
 }
 
+// ============ STORE ============
+
 interface BookingState {
-  // Réservation en cours de création (pendant le flow checkout)
-  currentBooking: Omit<BookingItem, "id" | "status" | "rated" | "createdAt" | "updatedAt"> | null;
+  draft: Partial<BookingDraft>;
+  bookings: BookingWithDetails[];
+  isLoading: boolean;
   
-  // Toutes les réservations
-  bookings: BookingItem[];
+  setCoiffeur: (coiffeur: BookingDraft["coiffeur"]) => void;
+  setService: (service: BookingDraft["service"]) => void;
+  setLocation: (location: BookingLocation, homeFee?: number) => void;
+  setDateTime: (date: string, time: string) => void;
+  setAddress: (address: BookingDraft["address"]) => void;
+  clearDraft: () => void;
   
-  // Actions
-  setCurrentBooking: (booking: Omit<BookingItem, "id" | "status" | "rated" | "createdAt" | "updatedAt">) => void;
-  clearCurrentBooking: () => void;
-  confirmBooking: () => void;
-  updateBookingStatus: (id: string, status: BookingStatus) => void;
-  cancelBooking: (id: string) => void;
-  rateBooking: (id: string) => void;
+  confirmBooking: () => Promise<{ success: boolean; error?: string }>;
+  loadBookings: () => Promise<void>;
+  cancelBooking: (id: string, reason?: string) => Promise<boolean>;
   
-  // Getters pour les onglets
-  getActiveBookings: () => BookingItem[];    // En cours (coiffeur en route ou prestation)
-  getUpcomingBookings: () => BookingItem[];  // À venir (confirmé ou pending)
-  getPastBookings: () => BookingItem[];      // Passées (terminé ou annulé)
+  getUpcomingBookings: () => BookingWithDetails[];
+  getPastBookings: () => BookingWithDetails[];
+  getActiveBookings: () => BookingWithDetails[];
 }
 
 export const useBookingStore = create<BookingState>((set, get) => ({
-  currentBooking: null,
+  draft: {},
   bookings: [],
+  isLoading: false,
 
-  setCurrentBooking: (booking) => {
-    set({ currentBooking: booking });
+  setCoiffeur: (coiffeur) => {
+    set((state) => ({ draft: { ...state.draft, coiffeur } }));
   },
 
-  clearCurrentBooking: () => {
-    set({ currentBooking: null });
+  setService: (service) => {
+    set((state) => ({ draft: { ...state.draft, service } }));
   },
 
-  confirmBooking: () => {
-    const { currentBooking, bookings } = get();
-    if (currentBooking) {
-      const newBooking: BookingItem = {
-        ...currentBooking,
-        id: `booking-${Date.now()}`,
-        status: "confirmed",
-        rated: false,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      };
-      set({
-        bookings: [newBooking, ...bookings],
-        currentBooking: null,
-      });
+  setLocation: (location, homeFee = 0) => {
+    set((state) => ({
+      draft: { 
+        ...state.draft, 
+        location,
+        home_fee_cents: location === "domicile" ? homeFee : 0,
+      },
+    }));
+  },
+
+  setDateTime: (date, time) => {
+    const start_at = `${date}T${time}:00`;
+    set((state) => ({ draft: { ...state.draft, date, time, start_at } }));
+  },
+
+  setAddress: (address) => {
+    set((state) => ({ draft: { ...state.draft, address } }));
+  },
+
+  clearDraft: () => {
+    set({ draft: {} });
+  },
+
+  confirmBooking: async () => {
+    const { draft } = get();
+    
+    if (!draft.coiffeur || !draft.service || !draft.start_at || !draft.location) {
+      return { success: false, error: "Données de réservation incomplètes" };
     }
+
+    const result = await createBooking({
+      coiffeur_id: draft.coiffeur.id,
+      start_at: draft.start_at,
+      location: draft.location,
+      home_fee_cents: draft.home_fee_cents || 0,
+      address_snapshot: draft.address ? {
+        address_line: draft.address.address_line,
+        city: draft.address.city,
+        postal_code: draft.address.postal_code,
+      } : undefined,
+      services: [{
+        service_id: draft.service.id,
+        service_name: draft.service.name,
+        price_cents: draft.service.price_cents,
+        duration_minutes: draft.service.duration_minutes,
+      }],
+    });
+
+    if (result.success && result.booking) {
+      await confirmPayment(result.booking.id, `pi_simulated_${Date.now()}`);
+      set((state) => ({
+        bookings: [result.booking!, ...state.bookings],
+        draft: {},
+      }));
+      return { success: true };
+    }
+
+    return { success: false, error: result.error };
   },
 
-  updateBookingStatus: (id, status) => {
-    set((state) => ({
-      bookings: state.bookings.map((b) =>
-        b.id === id
-          ? { ...b, status, updatedAt: new Date() }
-          : b
-      ),
-    }));
+  loadBookings: async () => {
+    set({ isLoading: true });
+    const bookings = await getClientBookings();
+    set({ bookings, isLoading: false });
   },
 
-  cancelBooking: (id) => {
-    set((state) => ({
-      bookings: state.bookings.map((b) =>
-        b.id === id
-          ? { ...b, status: "cancelled" as const, updatedAt: new Date() }
-          : b
-      ),
-    }));
-  },
-
-  rateBooking: (id) => {
-    set((state) => ({
-      bookings: state.bookings.map((b) =>
-        b.id === id
-          ? { ...b, rated: true, updatedAt: new Date() }
-          : b
-      ),
-    }));
-  },
-
-  getActiveBookings: () => {
-    const { bookings } = get();
-    return bookings.filter((b) =>
-      ["hairdresser_coming", "in_progress"].includes(b.status)
-    );
+  cancelBooking: async (id, reason) => {
+    const success = await apiCancelBooking(id, reason);
+    if (success) {
+      set((state) => ({
+        bookings: state.bookings.map((b) =>
+          b.id === id
+            ? { ...b, status: "cancelled" as BookingStatus, cancelled_at: new Date().toISOString() }
+            : b
+        ),
+      }));
+    }
+    return success;
   },
 
   getUpcomingBookings: () => {
     const { bookings } = get();
+    const now = new Date();
     return bookings
-      .filter((b) => ["pending", "confirmed"].includes(b.status))
-      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+      .filter((b) => ["pending", "confirmed"].includes(b.status) && new Date(b.start_at) > now)
+      .sort((a, b) => new Date(a.start_at).getTime() - new Date(b.start_at).getTime());
   },
 
   getPastBookings: () => {
     const { bookings } = get();
     return bookings
-      .filter((b) => ["completed", "cancelled"].includes(b.status))
-      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      .filter((b) => ["completed", "cancelled", "no_show"].includes(b.status))
+      .sort((a, b) => new Date(b.start_at).getTime() - new Date(a.start_at).getTime());
+  },
+
+  getActiveBookings: () => {
+    const { bookings } = get();
+    return bookings.filter((b) => ["in_progress"].includes(b.status));
   },
 }));
+
+// ============ HELPER ============
+
+export function getDraftSummary(draft: Partial<BookingDraft>) {
+  if (!draft.service) return null;
+  
+  const subtotal = draft.service.price_cents;
+  const homeFee = draft.home_fee_cents || 0;
+  const total = subtotal + homeFee;
+  
+  return {
+    serviceName: draft.service.name,
+    duration: `${draft.service.duration_minutes} min`,
+    coiffeurName: draft.coiffeur?.display_name || "",
+    coiffeurImage: draft.coiffeur?.avatar_url || "",
+    location: draft.location || "salon",
+    date: draft.date || "",
+    time: draft.time || "",
+    subtotalCents: subtotal,
+    homeFeeCents: homeFee,
+    totalCents: total,
+  };
+}

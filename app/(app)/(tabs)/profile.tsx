@@ -12,11 +12,12 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useRef } from "react";
+import { useRef, useEffect, useState } from "react";
 import { useRouter } from "expo-router";
 import { useScrollContext } from "./_layout";
 import { useAuthStore } from "@/stores/authStore";
 import { useBookingStore } from "@/stores/bookingStore";
+import { supabase } from "@/lib/supabase";
 import { ROUTES } from "@/constants/routes";
 
 // ============================================
@@ -36,51 +37,27 @@ const theme = {
   errorLight: "#FFEBEE",
 };
 
-// Données mock pour les stats
-const MOCK_STATS = {
-  favorites: 12,
-  appointments: 8,
-  rating: 4.9,
+// ============================================
+// HELPER - Formater la date "Membre depuis"
+// ============================================
+const formatMemberSince = (dateString: string | null): string => {
+  if (!dateString) return "Nouveau membre";
+  
+  const date = new Date(dateString);
+  const month = date.toLocaleDateString("fr-FR", { month: "long" });
+  const year = date.getFullYear();
+  
+  return `Membre depuis ${month} ${year}`;
 };
 
-const FAVORITES_MENU = [
-  { 
-    icon: "cut-outline", 
-    label: "Coiffeurs favoris", 
-    count: 5,
-    route: ROUTES.SHARED.FAVORITES.COIFFEURS,
-  },
-  { 
-    icon: "storefront-outline", 
-    label: "Salons favoris", 
-    count: 3,
-    route: ROUTES.SHARED.FAVORITES.SALONS,
-  },
-  { 
-    icon: "bookmark-outline", 
-    label: "Inspirations sauvegardées", 
-    count: 24,
-    route: ROUTES.SHARED.FAVORITES.INSPIRATIONS,
-  },
-];
-
-const ACCOUNT_MENU = [
-  { 
-    icon: "person-outline", 
-    label: "Informations personnelles",
-    route: ROUTES.SHARED.ACCOUNT.PERSONAL_INFO,
-  },
-  { 
-    icon: "card-outline", 
-    label: "Moyens de paiement",
-    route: ROUTES.SHARED.ACCOUNT.PAYMENT_METHODS,
-  },
-  { 
-    icon: "location-outline", 
-    label: "Adresses enregistrées",
-    route: ROUTES.SHARED.ACCOUNT.ADDRESSES,
-  },
-];
+// ============================================
+// TYPES
+// ============================================
+interface FavoriteCounts {
+  coiffeurs: number;
+  salons: number;
+  inspirations: number;
+}
 
 export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
@@ -94,8 +71,56 @@ export default function ProfileScreen() {
   const { bookings } = useBookingStore();
   const completedBookings = bookings.filter(b => b.status === "completed").length;
   
+  // State pour les compteurs de favoris (chargés depuis Supabase)
+  const [favoriteCounts, setFavoriteCounts] = useState<FavoriteCounts>({
+    coiffeurs: 0,
+    salons: 0,
+    inspirations: 0,
+  });
+  const [loadingFavorites, setLoadingFavorites] = useState(true);
+  
   const lastScrollY = useRef(0);
   const scrollTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Charger les compteurs de favoris depuis Supabase
+  useEffect(() => {
+    const fetchFavoriteCounts = async () => {
+      if (!user?.id) return;
+      
+      try {
+        // Compter les favoris par type
+        const { count: coiffeursCount } = await supabase
+          .from("favorites")
+          .select("*", { count: "exact", head: true })
+          .eq("user_id", user.id)
+          .eq("target_type", "coiffeur");
+        
+        const { count: salonsCount } = await supabase
+          .from("favorites")
+          .select("*", { count: "exact", head: true })
+          .eq("user_id", user.id)
+          .eq("target_type", "salon");
+        
+        const { count: inspirationsCount } = await supabase
+          .from("favorites")
+          .select("*", { count: "exact", head: true })
+          .eq("user_id", user.id)
+          .eq("target_type", "inspiration");
+        
+        setFavoriteCounts({
+          coiffeurs: coiffeursCount || 0,
+          salons: salonsCount || 0,
+          inspirations: inspirationsCount || 0,
+        });
+      } catch (error) {
+        console.error("Erreur chargement favoris:", error);
+      } finally {
+        setLoadingFavorites(false);
+      }
+    };
+    
+    fetchFavoriteCounts();
+  }, [user?.id]);
 
   const handleScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
     const currentY = event.nativeEvent.contentOffset.y;
@@ -145,13 +170,57 @@ export default function ProfileScreen() {
   };
 
   // Vérifier si l'utilisateur est un professionnel
-  const isProfessional = true;
+  const isProfessional = user?.role === "coiffeur" || user?.role === "salon";
 
-  // Données utilisateur (mock si non connecté)
-  const userName = user?.full_name || "Utilisateur";
-  const userEmail = user?.email || "email@example.com";
+  // Données utilisateur depuis le store (vraies données)
+  const userName = user?.full_name || `${user?.first_name || ""} ${user?.last_name || ""}`.trim() || "Utilisateur";
+  const userEmail = user?.email || "";
   const userImage = user?.avatar_url || "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200";
-  const memberYear = "2023";
+  const memberSince = formatMemberSince(user?.created_at || null);
+  
+  // Stats depuis les vraies données
+  const totalFavorites = favoriteCounts.coiffeurs + favoriteCounts.salons + favoriteCounts.inspirations;
+  const userRating = user?.rating_as_client || 0;
+
+  // Menu favoris avec compteurs dynamiques
+  const FAVORITES_MENU = [
+    { 
+      icon: "cut-outline", 
+      label: "Coiffeurs favoris", 
+      count: favoriteCounts.coiffeurs,
+      route: ROUTES.SHARED.FAVORITES.COIFFEURS,
+    },
+    { 
+      icon: "storefront-outline", 
+      label: "Salons favoris", 
+      count: favoriteCounts.salons,
+      route: ROUTES.SHARED.FAVORITES.SALONS,
+    },
+    { 
+      icon: "bookmark-outline", 
+      label: "Inspirations sauvegardées", 
+      count: favoriteCounts.inspirations,
+      route: ROUTES.SHARED.FAVORITES.INSPIRATIONS,
+    },
+  ];
+
+  const ACCOUNT_MENU = [
+    { 
+      icon: "person-outline", 
+      label: "Informations personnelles",
+      route: ROUTES.SHARED.ACCOUNT.PERSONAL_INFO,
+    },
+    { 
+      icon: "card-outline", 
+      label: "Moyens de paiement",
+      route: ROUTES.SHARED.ACCOUNT.PAYMENT_METHODS,
+    },
+    { 
+      icon: "location-outline", 
+      label: "Adresses enregistrées",
+      route: ROUTES.SHARED.ACCOUNT.ADDRESSES,
+    },
+  ];
 
   return (
     <View style={styles.container}>
@@ -176,25 +245,31 @@ export default function ProfileScreen() {
           
           <Text style={styles.userName}>{userName}</Text>
           <Text style={styles.userEmail}>{userEmail}</Text>
-          <Text style={styles.memberSince}>Membre depuis {memberYear}</Text>
+          <Text style={styles.memberSince}>{memberSince}</Text>
         </View>
 
         {/* Stats */}
         <View style={styles.statsRow}>
           <View style={styles.statItem}>
-            <Text style={styles.statValue}>{MOCK_STATS.favorites}</Text>
+            <Text style={styles.statValue}>{totalFavorites}</Text>
             <Text style={styles.statLabel}>Favoris</Text>
           </View>
           <View style={styles.statDivider} />
           <View style={styles.statItem}>
-            <Text style={styles.statValue}>{completedBookings || MOCK_STATS.appointments}</Text>
+            <Text style={styles.statValue}>{completedBookings}</Text>
             <Text style={styles.statLabel}>RDV</Text>
           </View>
           <View style={styles.statDivider} />
           <View style={styles.statItem}>
             <View style={styles.ratingContainer}>
-              <Ionicons name="star" size={14} color="#FFB800" />
-              <Text style={styles.statValue}>{MOCK_STATS.rating}</Text>
+              {userRating > 0 ? (
+                <>
+                  <Ionicons name="star" size={14} color="#FFB800" />
+                  <Text style={styles.statValue}>{userRating.toFixed(1)}</Text>
+                </>
+              ) : (
+                <Text style={styles.statValue}>-</Text>
+              )}
             </View>
             <Text style={styles.statLabel}>Note</Text>
           </View>
@@ -210,7 +285,7 @@ export default function ProfileScreen() {
           onScroll={handleScroll}
           scrollEventThrottle={16}
         >
-          {/* Switch to Pro */}
+          {/* Switch to Pro - seulement si l'utilisateur est un professionnel */}
           {isProfessional && (
             <Pressable style={styles.switchCard} onPress={handleSwitchToPro}>
               <View style={styles.switchCardLeft}>

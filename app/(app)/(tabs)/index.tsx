@@ -20,22 +20,20 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { InspirationCard, InspirationModal, CoiffeurCard } from "@shared";
 import SuccessModal from "@components/shared/SuccessModal";
 import { useScrollContext } from "./_layout";
-import { COIFFEURS, FILTERS, SEARCH_FILTERS, INSPIRATIONS } from "@constants/mockData";
+import { FILTERS, SEARCH_FILTERS } from "@constants/mockData";
 import { ROUTES } from "@/constants/routes";
 import { getInspirations, Inspiration } from "@api/inspirations";
+import { getCoiffeurs } from "@/api/coiffeurs";
+import type { CoiffeurWithDetails } from "@/types/database";
 
 const SCREEN_WIDTH = Dimensions.get("window").width;
 
-// ✅ FIX MASONRY (béton)
 const FEED_PADDING = 16;
 const COLUMN_GAP = 8;
 const COLUMN_WIDTH = (SCREEN_WIDTH - FEED_PADDING * 2 - COLUMN_GAP) / 2;
 
 const { height } = Dimensions.get("window");
 
-// ============================================
-// THEME - Style Premium (Header noir)
-// ============================================
 const theme = {
   black: "#000000",
   white: "#FFFFFF",
@@ -46,7 +44,6 @@ const theme = {
   border: "#E2E8F0",
 };
 
-// Adapter les données Supabase au format des composants
 const adaptInspiration = (item: Inspiration, index: number) => {
   const heights = [200, 240, 280, 220, 260];
   return {
@@ -60,6 +57,26 @@ const adaptInspiration = (item: Inspiration, index: number) => {
   };
 };
 
+// Adapter coiffeur DB au format attendu par CoiffeurCard
+const adaptCoiffeur = (c: CoiffeurWithDetails) => ({
+  id: c.id,
+  name: c.display_name || "Coiffeur",
+  salon: c.salon?.name || c.city || "Indépendant",
+  image: c.avatar_url || "",
+  avatar: c.avatar_url || "",
+  rating: Number(c.rating) || 0,
+  reviews: c.reviews_count || 0,
+  specialty: c.specialty || "",
+  distance: c.city || "",
+  services: (c.services || []).map(s => ({
+    id: s.id,
+    name: s.name,
+    duration: `${s.duration_minutes} min`,
+    price: s.price_cents / 100,
+  })),
+  photos: c.portfolio_urls || [],
+});
+
 export default function HomeScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -68,18 +85,23 @@ export default function HomeScreen() {
   const [activeTab, setActiveTab] = useState<string>("inspiration");
 
   const [inspirationsDB, setInspirationsDB] = useState<Inspiration[]>([]);
+  const [coiffeursDB, setCoiffeursDB] = useState<CoiffeurWithDetails[]>([]);
   const [loadingDB, setLoadingDB] = useState(true);
 
-  // Charger les inspirations depuis Supabase
   useEffect(() => {
-    async function loadInspirations() {
+    async function loadData() {
       setLoadingDB(true);
-      const data = await getInspirations();
-      console.log("📊 Inspirations from DB:", data.length);
-      setInspirationsDB(data);
+      const [inspirations, coiffeurs] = await Promise.all([
+        getInspirations(),
+        getCoiffeurs(),
+      ]);
+      console.log("📊 Inspirations from DB:", inspirations.length);
+      console.log("📊 Coiffeurs from DB:", coiffeurs.length);
+      setInspirationsDB(inspirations);
+      setCoiffeursDB(coiffeurs);
       setLoadingDB(false);
     }
-    loadInspirations();
+    loadData();
   }, []);
 
   const [activeFilters, setActiveFilters] = useState<string[]>([]);
@@ -89,7 +111,7 @@ export default function HomeScreen() {
   const [filterModalVisible, setFilterModalVisible] = useState(false);
   const [filterSearch, setFilterSearch] = useState("");
 
-  const [selectedInspiration, setSelectedInspiration] = useState<typeof INSPIRATIONS[0] | null>(null);
+  const [selectedInspiration, setSelectedInspiration] = useState<any | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
 
   const [successModalVisible, setSuccessModalVisible] = useState(false);
@@ -173,7 +195,6 @@ export default function HomeScreen() {
       );
     }
 
-    // Adapter au format attendu par les composants (avec index pour la hauteur)
     return data.map((item, index) => adaptInspiration(item, index));
   }, [activeFilters, inspirationsDB]);
 
@@ -181,18 +202,18 @@ export default function HomeScreen() {
   const rightColumn = filteredInspirations.filter((_, index) => index % 2 === 1);
 
   const filteredCoiffeurs = useMemo(() => {
-    let results = COIFFEURS;
+    let results = coiffeursDB.map(adaptCoiffeur);
     if (search) {
       const searchLower = search.toLowerCase();
       results = results.filter(
         (c) =>
-          c.name.toLowerCase().includes(searchLower) ||
-          c.salon.toLowerCase().includes(searchLower) ||
-          c.specialty.toLowerCase().includes(searchLower)
+          (c.name || "").toLowerCase().includes(searchLower) ||
+          (c.salon || "").toLowerCase().includes(searchLower) ||
+          (c.specialty || "").toLowerCase().includes(searchLower)
       );
     }
     return results;
-  }, [search]);
+  }, [search, coiffeursDB]);
 
   const currentFilters = activeTab === "inspiration" ? FILTERS : SEARCH_FILTERS;
 
@@ -205,9 +226,7 @@ export default function HomeScreen() {
 
   return (
     <View style={styles.container}>
-      {/* HEADER NOIR */}
       <View style={[styles.header, { paddingTop: insets.top + 16 }]}>
-        {/* Titre */}
         <View style={styles.headerTop}>
           <Text style={styles.headerTitle}>Découvrir</Text>
           <Pressable
@@ -218,7 +237,6 @@ export default function HomeScreen() {
           </Pressable>
         </View>
 
-        {/* Tabs */}
         <View style={styles.headerTabs}>
           <Pressable
             onPress={() => setActiveTab("inspiration")}
@@ -257,7 +275,6 @@ export default function HomeScreen() {
             </Text>
           </Pressable>
 
-          {/* Bouton Filtre */}
           <Pressable
             onPress={() => setFilterModalVisible(true)}
             style={[styles.filterButton, hasActiveFilters && styles.filterButtonActive]}
@@ -274,7 +291,6 @@ export default function HomeScreen() {
         </View>
       </View>
 
-      {/* CONTENU BLANC ARRONDI */}
       <View style={styles.content}>
         <ScrollView
           style={styles.scrollView}
@@ -283,7 +299,6 @@ export default function HomeScreen() {
           onScroll={handleScroll}
           scrollEventThrottle={16}
         >
-          {/* TAB INSPIRATION */}
           {activeTab === "inspiration" && (
             <>
               {activeFilters.length > 0 && (
@@ -319,7 +334,6 @@ export default function HomeScreen() {
                     <Text style={styles.emptySubtitle}>Essayez de modifier vos filtres</Text>
                   </View>
                 ) : (
-                  // ✅ MASONRY FIX (50/50 béton)
                   <View style={{ flexDirection: "row", paddingHorizontal: FEED_PADDING }}>
                     <View style={{ width: COLUMN_WIDTH, marginRight: COLUMN_GAP / 2 }}>
                       {leftColumn.map((item) => (
@@ -346,7 +360,6 @@ export default function HomeScreen() {
             </>
           )}
 
-          {/* TAB COIFFEURS */}
           {activeTab === "recherche" && (
             <>
               <View style={styles.searchContainer}>
@@ -413,7 +426,6 @@ export default function HomeScreen() {
         </ScrollView>
       </View>
 
-      {/* MODAL FILTRES */}
       <Modal visible={filterModalVisible} transparent animationType="fade">
         <KeyboardAvoidingView
           behavior={Platform.OS === "ios" ? "padding" : "height"}
@@ -514,7 +526,6 @@ export default function HomeScreen() {
         </KeyboardAvoidingView>
       </Modal>
 
-      {/* MODAL INSPIRATION */}
       <InspirationModal
         visible={modalVisible}
         item={selectedInspiration}
@@ -528,7 +539,6 @@ export default function HomeScreen() {
         }}
       />
 
-      {/* SUCCESS MODAL */}
       <SuccessModal
         visible={successModalVisible}
         onClose={() => setSuccessModalVisible(false)}
@@ -546,325 +556,59 @@ export default function HomeScreen() {
   );
 }
 
-// ============================================
-// STYLES
-// ============================================
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: theme.black,
-  },
-
-  // Header noir
-  header: {
-    backgroundColor: theme.black,
-    paddingHorizontal: 20,
-    paddingBottom: 20,
-  },
-  headerTop: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 20,
-  },
-  headerTitle: {
-    fontSize: 28,
-    fontWeight: "bold",
-    color: theme.white,
-  },
-  notificationButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: "rgba(255,255,255,0.15)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-
-  // Header Tabs
-  headerTabs: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-  },
-  headerTab: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 20,
-    gap: 6,
-  },
-  headerTabLarge: {
-    flex: 1,
-  },
-  headerTabActive: {
-    backgroundColor: "rgba(255,255,255,0.15)",
-  },
-  headerTabText: {
-    fontSize: 14,
-    fontWeight: "500",
-    color: "rgba(255,255,255,0.5)",
-  },
-  headerTabTextActive: {
-    color: theme.white,
-    fontWeight: "600",
-  },
-  filterButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  filterButtonActive: {
-    backgroundColor: "rgba(255,255,255,0.15)",
-  },
-  filterBadge: {
-    position: "absolute",
-    top: 4,
-    right: 4,
-    minWidth: 16,
-    height: 16,
-    borderRadius: 8,
-    backgroundColor: theme.white,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  filterBadgeText: {
-    color: theme.black,
-    fontSize: 9,
-    fontWeight: "bold",
-  },
-
-  // Content blanc arrondi
-  content: {
-    flex: 1,
-    backgroundColor: theme.white,
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-  },
-  scrollView: {
-    flex: 1,
-  },
-
-  // Filtres actifs
-  filtersActive: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-  },
-  filtersRow: {
-    flexDirection: "row",
-    gap: 8,
-    alignItems: "center",
-  },
-  filterChip: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: theme.card,
-    paddingVertical: 6,
-    paddingLeft: 12,
-    paddingRight: 8,
-    borderRadius: 10,
-    gap: 6,
-  },
-  filterChipText: {
-    color: theme.text,
-    fontSize: 13,
-  },
-  clearFilters: {
-    color: theme.textMuted,
-    fontSize: 12,
-    paddingHorizontal: 8,
-  },
-  resultsCount: {
-    color: theme.textMuted,
-    fontSize: 12,
-    marginTop: 6,
-  },
-
-  // Feed Masonry
-  feed: {
-    // ✅ on enlève le padding ici (car on le met dans la vue masonry)
-    // paddingHorizontal: 12,
-  },
-
-  // Empty State
-  emptyState: {
-    alignItems: "center",
-    paddingVertical: 60,
-    paddingHorizontal: 32,
-  },
-  emptyIconContainer: {
-    width: 96,
-    height: 96,
-    borderRadius: 48,
-    backgroundColor: theme.card,
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 20,
-  },
-  emptyTitle: {
-    fontSize: 18,
-    fontWeight: "600",
-    color: theme.text,
-    marginBottom: 8,
-  },
-  emptySubtitle: {
-    fontSize: 14,
-    color: theme.textMuted,
-    textAlign: "center",
-  },
-
-  // Search
-  searchContainer: {
-    paddingHorizontal: 16,
-    marginBottom: 16,
-  },
-  searchInput: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: theme.card,
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    height: 48,
-  },
-  searchTextInput: {
-    flex: 1,
-    color: theme.text,
-    paddingVertical: 12,
-    paddingHorizontal: 10,
-    fontSize: 15,
-  },
-
-  // Coiffeurs list
-  coiffeursList: {
-    paddingHorizontal: 16,
-  },
-
-  // Modal
-  modalBackdrop: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.5)",
-    justifyContent: "flex-end",
-  },
-  modalContent: {
-    backgroundColor: theme.white,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    maxHeight: height * 0.7,
-  },
-  modalHandle: {
-    width: 40,
-    height: 4,
-    backgroundColor: theme.border,
-    borderRadius: 2,
-    alignSelf: "center",
-    marginTop: 12,
-    marginBottom: 8,
-  },
-  modalBody: {
-    padding: 16,
-  },
-  modalHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 16,
-  },
-  modalTitle: {
-    color: theme.text,
-    fontSize: 18,
-    fontWeight: "600",
-  },
-  modalSubtitle: {
-    color: theme.textMuted,
-    fontSize: 13,
-  },
-  modalSearchInput: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: theme.card,
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    marginBottom: 16,
-  },
-  modalSearchTextInput: {
-    flex: 1,
-    color: theme.text,
-    paddingVertical: 12,
-    paddingHorizontal: 10,
-    fontSize: 15,
-  },
-  modalFiltersScroll: {
-    maxHeight: 280,
-  },
-  modalFiltersGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 10,
-  },
-  modalFilterItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 12,
-    backgroundColor: theme.card,
-    gap: 8,
-  },
-  modalFilterItemSelected: {
-    backgroundColor: theme.black,
-  },
-  checkbox: {
-    width: 20,
-    height: 20,
-    borderRadius: 6,
-    borderWidth: 2,
-    borderColor: theme.border,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  checkboxSelected: {
-    backgroundColor: theme.black,
-    borderColor: theme.black,
-  },
-  modalFilterText: {
-    fontSize: 14,
-    color: theme.text,
-  },
-  modalFilterTextSelected: {
-    color: theme.white,
-    fontWeight: "600",
-  },
-  modalActions: {
-    flexDirection: "row",
-    gap: 12,
-    marginTop: 20,
-  },
-  modalResetButton: {
-    flex: 1,
-    paddingVertical: 14,
-    alignItems: "center",
-    backgroundColor: theme.card,
-    borderRadius: 12,
-  },
-  modalResetText: {
-    color: theme.textSecondary,
-    fontWeight: "500",
-    fontSize: 14,
-  },
-  modalApplyButton: {
-    flex: 1,
-    paddingVertical: 14,
-    alignItems: "center",
-    borderRadius: 12,
-    backgroundColor: theme.black,
-  },
-  modalApplyText: {
-    color: theme.white,
-    fontWeight: "600",
-    fontSize: 14,
-  },
+  container: { flex: 1, backgroundColor: theme.black },
+  header: { backgroundColor: theme.black, paddingHorizontal: 20, paddingBottom: 20 },
+  headerTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 20 },
+  headerTitle: { fontSize: 28, fontWeight: "bold", color: theme.white },
+  notificationButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: "rgba(255,255,255,0.15)", alignItems: "center", justifyContent: "center" },
+  headerTabs: { flexDirection: "row", alignItems: "center", gap: 6 },
+  headerTab: { flexDirection: "row", alignItems: "center", justifyContent: "center", paddingVertical: 10, paddingHorizontal: 14, borderRadius: 20, gap: 6 },
+  headerTabLarge: { flex: 1 },
+  headerTabActive: { backgroundColor: "rgba(255,255,255,0.15)" },
+  headerTabText: { fontSize: 14, fontWeight: "500", color: "rgba(255,255,255,0.5)" },
+  headerTabTextActive: { color: theme.white, fontWeight: "600" },
+  filterButton: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" },
+  filterButtonActive: { backgroundColor: "rgba(255,255,255,0.15)" },
+  filterBadge: { position: "absolute", top: 4, right: 4, minWidth: 16, height: 16, borderRadius: 8, backgroundColor: theme.white, alignItems: "center", justifyContent: "center" },
+  filterBadgeText: { color: theme.black, fontSize: 9, fontWeight: "bold" },
+  content: { flex: 1, backgroundColor: theme.white, borderTopLeftRadius: 28, borderTopRightRadius: 28 },
+  scrollView: { flex: 1 },
+  filtersActive: { paddingHorizontal: 16, paddingVertical: 8 },
+  filtersRow: { flexDirection: "row", gap: 8, alignItems: "center" },
+  filterChip: { flexDirection: "row", alignItems: "center", backgroundColor: theme.card, paddingVertical: 6, paddingLeft: 12, paddingRight: 8, borderRadius: 10, gap: 6 },
+  filterChipText: { color: theme.text, fontSize: 13 },
+  clearFilters: { color: theme.textMuted, fontSize: 12, paddingHorizontal: 8 },
+  resultsCount: { color: theme.textMuted, fontSize: 12, marginTop: 6 },
+  feed: {},
+  emptyState: { alignItems: "center", paddingVertical: 60, paddingHorizontal: 32 },
+  emptyIconContainer: { width: 96, height: 96, borderRadius: 48, backgroundColor: theme.card, alignItems: "center", justifyContent: "center", marginBottom: 20 },
+  emptyTitle: { fontSize: 18, fontWeight: "600", color: theme.text, marginBottom: 8 },
+  emptySubtitle: { fontSize: 14, color: theme.textMuted, textAlign: "center" },
+  searchContainer: { paddingHorizontal: 16, marginBottom: 16 },
+  searchInput: { flexDirection: "row", alignItems: "center", backgroundColor: theme.card, borderRadius: 14, paddingHorizontal: 14, height: 48 },
+  searchTextInput: { flex: 1, color: theme.text, paddingVertical: 12, paddingHorizontal: 10, fontSize: 15 },
+  coiffeursList: { paddingHorizontal: 16 },
+  modalBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
+  modalContent: { backgroundColor: theme.white, borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: height * 0.7 },
+  modalHandle: { width: 40, height: 4, backgroundColor: theme.border, borderRadius: 2, alignSelf: "center", marginTop: 12, marginBottom: 8 },
+  modalBody: { padding: 16 },
+  modalHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 16 },
+  modalTitle: { color: theme.text, fontSize: 18, fontWeight: "600" },
+  modalSubtitle: { color: theme.textMuted, fontSize: 13 },
+  modalSearchInput: { flexDirection: "row", alignItems: "center", backgroundColor: theme.card, borderRadius: 12, paddingHorizontal: 12, marginBottom: 16 },
+  modalSearchTextInput: { flex: 1, color: theme.text, paddingVertical: 12, paddingHorizontal: 10, fontSize: 15 },
+  modalFiltersScroll: { maxHeight: 280 },
+  modalFiltersGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
+  modalFilterItem: { flexDirection: "row", alignItems: "center", paddingVertical: 12, paddingHorizontal: 16, borderRadius: 12, backgroundColor: theme.card, gap: 8 },
+  modalFilterItemSelected: { backgroundColor: theme.black },
+  checkbox: { width: 20, height: 20, borderRadius: 6, borderWidth: 2, borderColor: theme.border, alignItems: "center", justifyContent: "center" },
+  checkboxSelected: { backgroundColor: theme.black, borderColor: theme.black },
+  modalFilterText: { fontSize: 14, color: theme.text },
+  modalFilterTextSelected: { color: theme.white, fontWeight: "600" },
+  modalActions: { flexDirection: "row", gap: 12, marginTop: 20 },
+  modalResetButton: { flex: 1, paddingVertical: 14, alignItems: "center", backgroundColor: theme.card, borderRadius: 12 },
+  modalResetText: { color: theme.textSecondary, fontWeight: "500", fontSize: 14 },
+  modalApplyButton: { flex: 1, paddingVertical: 14, alignItems: "center", borderRadius: 12, backgroundColor: theme.black },
+  modalApplyText: { color: theme.white, fontWeight: "600", fontSize: 14 },
 });

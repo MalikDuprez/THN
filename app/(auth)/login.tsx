@@ -10,17 +10,19 @@ import {
   Platform,
   ActivityIndicator,
   Alert,
+  ScrollView,
 } from "react-native";
 import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
+import { supabase } from "@/lib/supabase";
 import { useAuthStore } from "@/stores/authStore";
 import { ROUTES } from "@/constants/routes";
 
 export default function LoginScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { signIn } = useAuthStore();
+  const { fetchProfile } = useAuthStore();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -28,19 +30,56 @@ export default function LoginScreen() {
   const [loading, setLoading] = useState(false);
 
   const handleLogin = async () => {
-    if (!email || !password) {
+    // Validation
+    if (!email.trim() || !password) {
       Alert.alert("Erreur", "Veuillez remplir tous les champs");
       return;
     }
 
     setLoading(true);
-    const { error } = await signIn(email, password);
-    setLoading(false);
 
-    if (error) {
-      Alert.alert("Erreur", error);
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: email.trim().toLowerCase(),
+        password,
+      });
+
+      if (error) {
+        if (error.message.includes("Invalid login credentials")) {
+          Alert.alert("Erreur", "Email ou mot de passe incorrect");
+        } else {
+          Alert.alert("Erreur", error.message);
+        }
+        setLoading(false);
+        return;
+      }
+
+      if (data.user) {
+        // Attendre un peu que le trigger crée le profil (si nouvelle inscription)
+        await new Promise(resolve => setTimeout(resolve, 300));
+        
+        // Vérifier si l'onboarding est complété
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("onboarding_completed")
+          .eq("id", data.user.id)
+          .maybeSingle();
+
+        // Charger le profil dans le store
+        await fetchProfile();
+
+        // Rediriger selon l'état de l'onboarding
+        if (profile?.onboarding_completed) {
+          router.replace(ROUTES.CLIENT.HOME);
+        } else {
+          router.replace("/(auth)/onboarding/personal-info");
+        }
+      }
+    } catch (e: any) {
+      Alert.alert("Erreur", e.message || "Une erreur est survenue");
+    } finally {
+      setLoading(false);
     }
-    // La redirection est gérée automatiquement par le _layout.tsx racine
   };
 
   return (
@@ -48,14 +87,21 @@ export default function LoginScreen() {
       style={styles.container}
       behavior={Platform.OS === "ios" ? "padding" : "height"}
     >
-      <View style={[styles.content, { paddingTop: insets.top + 20, paddingBottom: insets.bottom }]}>
+      <ScrollView 
+        contentContainerStyle={[
+          styles.content, 
+          { paddingTop: insets.top + 20, paddingBottom: insets.bottom + 24 }
+        ]}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
         {/* Header */}
         <View style={styles.header}>
           <Pressable onPress={() => router.back()} style={styles.backButton}>
             <Ionicons name="arrow-back" size={24} color="#000" />
           </Pressable>
-          <Text style={styles.title}>Connexion</Text>
-          <Text style={styles.subtitle}>Bon retour parmi nous !</Text>
+          <Text style={styles.title}>Bon retour !</Text>
+          <Text style={styles.subtitle}>Connectez-vous à votre compte</Text>
         </View>
 
         {/* Form */}
@@ -73,6 +119,7 @@ export default function LoginScreen() {
                 keyboardType="email-address"
                 autoCapitalize="none"
                 autoCorrect={false}
+                autoComplete="email"
               />
             </View>
           </View>
@@ -88,6 +135,7 @@ export default function LoginScreen() {
                 value={password}
                 onChangeText={setPassword}
                 secureTextEntry={!showPassword}
+                autoComplete="password"
               />
               <Pressable onPress={() => setShowPassword(!showPassword)}>
                 <Ionicons 
@@ -125,7 +173,7 @@ export default function LoginScreen() {
             </Pressable>
           </View>
         </View>
-      </View>
+      </ScrollView>
     </KeyboardAvoidingView>
   );
 }
@@ -136,11 +184,11 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFFFFF",
   },
   content: {
-    flex: 1,
+    flexGrow: 1,
     paddingHorizontal: 24,
   },
   header: {
-    marginBottom: 40,
+    marginBottom: 32,
   },
   backButton: {
     width: 44,
@@ -191,9 +239,10 @@ const styles = StyleSheet.create({
   forgotPasswordText: {
     fontSize: 14,
     color: "#666",
+    fontWeight: "500",
   },
   actions: {
-    paddingBottom: 24,
+    paddingTop: 32,
     gap: 16,
   },
   primaryButton: {

@@ -2,43 +2,59 @@ import { create } from "zustand";
 import { supabase } from "@/lib/supabase";
 
 type UserRole = "client" | "coiffeur" | "salon" | null;
+type Gender = "male" | "female" | "other" | null;
 
 interface Profile {
   id: string;
   email: string;
+  first_name: string | null;
+  last_name: string | null;
   full_name: string | null;
   avatar_url: string | null;
   phone: string | null;
   role: UserRole;
+  gender: Gender;
+  gender_custom: string | null;
+  birth_date: string | null;
+  created_at: string | null;
+  onboarding_completed: boolean;
+  rating_as_client: number | null;
+  reviews_count_as_client: number | null;
 }
 
 interface AuthState {
   user: Profile | null;
   isAuthenticated: boolean;
   isLoading: boolean;
-  // Mode démo
   demoMode: boolean;
   demoRole: UserRole;
   setUser: (user: Profile | null) => void;
   setLoading: (loading: boolean) => void;
-  signUp: (email: string, password: string, fullName: string) => Promise<{ error: string | null }>;
+  signUp: (email: string, password: string) => Promise<{ error: string | null }>;
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
   setRole: (role: UserRole) => Promise<{ error: string | null }>;
   fetchProfile: () => Promise<void>;
-  // Fonctions démo
   enableDemoMode: () => void;
   setDemoRole: (role: UserRole) => void;
 }
 
-// Utilisateur démo par défaut
 const DEMO_USER: Profile = {
   id: "demo-user-001",
   email: "demo@tapehair.com",
+  first_name: "Marie",
+  last_name: "Dupont",
   full_name: "Marie Dupont",
   avatar_url: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=200",
-  phone: "06 12 34 56 78",
+  phone: "0612345678",
   role: "client",
+  gender: "female",
+  gender_custom: null,
+  birth_date: "1990-05-15",
+  created_at: "2023-01-15T10:00:00Z",
+  onboarding_completed: true,
+  rating_as_client: 4.9,
+  reviews_count_as_client: 12,
 };
 
 export const useAuthStore = create<AuthState>((set, get) => ({
@@ -51,7 +67,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   setUser: (user) => set({ user, isAuthenticated: !!user }),
   setLoading: (loading) => set({ isLoading: loading }),
 
-  // Active le mode démo avec un utilisateur fictif
   enableDemoMode: () => {
     set({
       demoMode: true,
@@ -61,7 +76,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     });
   },
 
-  // Change le rôle en mode démo (client/pro)
   setDemoRole: (role) => {
     const { user, demoMode } = get();
     if (demoMode && user) {
@@ -72,12 +86,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
   },
 
-  signUp: async (email, password, fullName) => {
-    // En mode démo, simule l'inscription
+  signUp: async (email, password) => {
     const { demoMode } = get();
     if (demoMode) {
       set({
-        user: { ...DEMO_USER, email, full_name: fullName },
+        user: { ...DEMO_USER, email },
         isAuthenticated: true,
         isLoading: false,
       });
@@ -85,22 +98,14 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
 
     try {
-      const { data, error } = await supabase.auth.signUp({ email, password });
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+      });
+
       if (error) return { error: error.message };
-      if (data.user) {
-        const { error: profileError } = await supabase.from("profiles").insert({
-          id: data.user.id,
-          email: email,
-          full_name: fullName,
-          role: null,
-        });
-        if (profileError) return { error: profileError.message };
-        set({
-          user: { id: data.user.id, email, full_name: fullName, avatar_url: null, phone: null, role: null },
-          isAuthenticated: true,
-          isLoading: false,
-        });
-      }
+
+      // Le profil sera chargé après l'onboarding
       return { error: null };
     } catch (e: any) {
       return { error: e.message };
@@ -108,7 +113,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   signIn: async (email, password) => {
-    // En mode démo, simule la connexion
     const { demoMode } = get();
     if (demoMode) {
       set({
@@ -139,11 +143,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   setRole: async (role) => {
     const { user, demoMode } = get();
-    if (!user) return { error: "Non connecte" };
+    if (!user) return { error: "Non connecté" };
 
-    // En mode démo, mise à jour locale uniquement
     if (demoMode) {
-      set({ 
+      set({
         user: { ...user, role },
         demoRole: role,
       });
@@ -154,9 +157,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       const { error } = await supabase.from("profiles").update({ role }).eq("id", user.id);
       if (error) return { error: error.message };
 
-      // Si coiffeur, creer l'entree dans la table coiffeurs
       if (role === "coiffeur") {
-        // Verifier si existe deja
         const { data: existing } = await supabase
           .from("coiffeurs")
           .select("id")
@@ -166,27 +167,26 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         if (!existing) {
           const { error: coiffeurError } = await supabase.from("coiffeurs").insert({
             profile_id: user.id,
-            specialty: null,
-            bio: null,
-            hourly_rate: null,
+            display_name: user.full_name,
+            gender: user.gender,
           });
-          if (coiffeurError) console.error("Erreur creation coiffeur:", coiffeurError);
+          if (coiffeurError) console.error("Erreur création coiffeur:", coiffeurError);
         }
       }
 
-      // Si salon, creer l'entree dans la table salons
       if (role === "salon") {
         const { data: existing } = await supabase
           .from("salons")
           .select("id")
-          .eq("profile_id", user.id)
+          .eq("owner_id", user.id)
           .single();
 
         if (!existing) {
-          await supabase.from("salons").insert({
-            profile_id: user.id,
+          const { error: salonError } = await supabase.from("salons").insert({
+            owner_id: user.id,
             name: user.full_name || "Mon Salon",
           });
+          if (salonError) console.error("Erreur création salon:", salonError);
         }
       }
 
@@ -205,16 +205,76 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
 
     try {
-      const { data: { user: authUser } } = await supabase.auth.getUser();
-      if (!authUser) { set({ user: null, isAuthenticated: false, isLoading: false }); return; }
-      const { data: profile, error } = await supabase.from("profiles").select("*").eq("id", authUser.id).single();
-      if (error || !profile) { set({ user: null, isAuthenticated: false, isLoading: false }); return; }
+      const {
+        data: { user: authUser },
+      } = await supabase.auth.getUser();
+
+      if (!authUser) {
+        set({ user: null, isAuthenticated: false, isLoading: false });
+        return;
+      }
+
+      const { data: profile, error } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("id", authUser.id)
+        .maybeSingle();
+
+      if (error) {
+        console.error("Error fetching profile:", error);
+        set({ user: null, isAuthenticated: false, isLoading: false });
+        return;
+      }
+
+      if (!profile) {
+        // Profil n'existe pas encore, l'utilisateur doit faire l'onboarding
+        set({ 
+          user: {
+            id: authUser.id,
+            email: authUser.email || "",
+            first_name: null,
+            last_name: null,
+            full_name: null,
+            avatar_url: null,
+            phone: null,
+            role: "client",
+            gender: null,
+            gender_custom: null,
+            birth_date: null,
+            created_at: null,
+            onboarding_completed: false,
+            rating_as_client: null,
+            reviews_count_as_client: null,
+          }, 
+          isAuthenticated: true, 
+          isLoading: false 
+        });
+        return;
+      }
+
       set({
-        user: { id: profile.id, email: profile.email, full_name: profile.full_name, avatar_url: profile.avatar_url, phone: profile.phone, role: profile.role },
+        user: {
+          id: profile.id,
+          email: profile.email,
+          first_name: profile.first_name,
+          last_name: profile.last_name,
+          full_name: profile.full_name,
+          avatar_url: profile.avatar_url,
+          phone: profile.phone,
+          role: profile.role,
+          gender: profile.gender,
+          gender_custom: profile.gender_custom,
+          birth_date: profile.birth_date,
+          created_at: profile.created_at,
+          onboarding_completed: profile.onboarding_completed || false,
+          rating_as_client: profile.rating_as_client,
+          reviews_count_as_client: profile.reviews_count_as_client,
+        },
         isAuthenticated: true,
         isLoading: false,
       });
     } catch (e) {
+      console.error("fetchProfile error:", e);
       set({ user: null, isAuthenticated: false, isLoading: false });
     }
   },

@@ -1,0 +1,150 @@
+// src/api/coiffeurs.ts
+import { supabase } from "@/lib/supabase";
+import type { Coiffeur, CoiffeurWithDetails, Service } from "@/types/database";
+
+// ============ COIFFEURS ============
+
+// Récupérer tous les coiffeurs actifs
+export async function getCoiffeurs(): Promise<CoiffeurWithDetails[]> {
+  const { data, error } = await supabase
+    .from("coiffeurs")
+    .select(`
+      *,
+      profile:profiles(*),
+      salon:salons(*),
+      services(*)
+    `)
+    .eq("is_active", true)
+    .eq("is_available", true)
+    .order("rating", { ascending: false });
+
+  if (error) {
+    console.error("Error fetching coiffeurs:", error);
+    return [];
+  }
+
+  return data || [];
+}
+
+// Récupérer un coiffeur par ID avec ses détails
+export async function getCoiffeurById(id: string): Promise<CoiffeurWithDetails | null> {
+  const { data, error } = await supabase
+    .from("coiffeurs")
+    .select(`
+      *,
+      profile:profiles(*),
+      salon:salons(*),
+      services(*)
+    `)
+    .eq("id", id)
+    .single();
+
+  if (error) {
+    console.error("Error fetching coiffeur:", error);
+    return null;
+  }
+
+  return data;
+}
+
+// Récupérer les coiffeurs par ville
+export async function getCoiffeursByCity(city: string): Promise<CoiffeurWithDetails[]> {
+  const { data, error } = await supabase
+    .from("coiffeurs")
+    .select(`
+      *,
+      profile:profiles(*),
+      salon:salons(*),
+      services(*)
+    `)
+    .eq("is_active", true)
+    .ilike("city", `%${city}%`)
+    .order("rating", { ascending: false });
+
+  if (error) {
+    console.error("Error fetching coiffeurs by city:", error);
+    return [];
+  }
+
+  return data || [];
+}
+
+// Récupérer les coiffeurs qui offrent le service à domicile
+export async function getCoiffeursWithHomeService(): Promise<CoiffeurWithDetails[]> {
+  const { data, error } = await supabase
+    .from("coiffeurs")
+    .select(`
+      *,
+      profile:profiles(*),
+      salon:salons(*),
+      services(*)
+    `)
+    .eq("is_active", true)
+    .eq("offers_home_service", true)
+    .order("rating", { ascending: false });
+
+  if (error) {
+    console.error("Error fetching home service coiffeurs:", error);
+    return [];
+  }
+
+  return data || [];
+}
+
+// ============ SERVICES ============
+
+// Récupérer les services d'un coiffeur
+export async function getServicesByCoiffeur(coiffeurId: string): Promise<Service[]> {
+  const { data, error } = await supabase
+    .from("services")
+    .select("*")
+    .eq("coiffeur_id", coiffeurId)
+    .eq("is_active", true)
+    .order("display_order", { ascending: true });
+
+  if (error) {
+    console.error("Error fetching services:", error);
+    return [];
+  }
+
+  return data || [];
+}
+
+// Récupérer un service par ID
+export async function getServiceById(id: string): Promise<Service | null> {
+  const { data, error } = await supabase
+    .from("services")
+    .select("*")
+    .eq("id", id)
+    .single();
+
+  if (error) {
+    console.error("Error fetching service:", error);
+    return null;
+  }
+
+  return data;
+}
+
+// Récupérer les services disponibles selon le lieu (salon ou domicile)
+export async function getServicesByLocation(
+  coiffeurId: string,
+  location: "salon" | "domicile"
+): Promise<Service[]> {
+  const column = location === "salon" ? "available_at_salon" : "available_at_home";
+  
+  const { data, error } = await supabase
+    .from("services")
+    .select("*")
+    .eq("coiffeur_id", coiffeurId)
+    .eq("is_active", true)
+    .eq(column, true)
+    .order("display_order", { ascending: true });
+
+  if (error) {
+    console.error("Error fetching services by location:", error);
+    return [];
+  }
+
+  return data || [];
+}
