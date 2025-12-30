@@ -148,6 +148,48 @@ export interface AddressSnapshot {
   country?: string;
 }
 
+// ============ NOTIFICATIONS ============
+export type NotificationType =
+  | "new_booking"           // Client a réservé (pour coiffeur)
+  | "booking_confirmed"     // RDV confirmé (pour client)
+  | "booking_cancelled"     // RDV annulé (pour les deux)
+  | "booking_reminder"      // Rappel RDV (J-1 ou H-2)
+  | "booking_completed"     // RDV terminé, laisser un avis (pour client)
+  | "new_message"           // Nouveau message chat
+  | "new_review"            // Nouvel avis reçu
+  | "review_response"       // Réponse à un avis
+  | "welcome"               // Bienvenue
+  | "promo";                // Promotion
+
+export interface Notification {
+  id: string;
+  recipient_id: string;
+  type: NotificationType;
+  title: string;
+  body: string | null;
+  data: NotificationData;
+  actor_id: string | null;
+  image_url: string | null;
+  is_read: boolean;
+  read_at: string | null;
+  push_sent: boolean;
+  push_sent_at: string | null;
+  push_error: string | null;
+  created_at: string;
+}
+
+export interface NotificationData {
+  booking_id?: string;
+  coiffeur_id?: string;
+  conversation_id?: string;
+  review_id?: string;
+  [key: string]: unknown;
+}
+
+export interface NotificationWithActor extends Notification {
+  actor?: Profile;
+}
+
 // ============ HELPERS ============
 export const centsToEuros = (cents: number): number => cents / 100;
 

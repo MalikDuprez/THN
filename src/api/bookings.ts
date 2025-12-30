@@ -87,7 +87,7 @@ export async function createBooking(input: CreateBookingInput): Promise<CreateBo
         platform_fee_cents,
         discount_cents: 0,
         total_cents,
-        status: "pending",
+        status: "confirmed",
         payment_status: "pending",
         client_notes: input.client_notes || null,
       })
@@ -456,4 +456,376 @@ export async function getCoiffeurAvailableSlots(
   console.log("✅ Disponibles:", availableSlots);
 
   return availableSlots;
+}
+
+// ============ RÉSERVATIONS COIFFEUR CONNECTÉ ============
+
+// Récupérer l'ID du coiffeur connecté
+async function getMyCoiffeurId(): Promise<string | null> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return null;
+
+  const { data: coiffeur } = await supabase
+    .from("coiffeurs")
+    .select("id")
+    .eq("profile_id", user.id)
+    .single();
+
+  return coiffeur?.id || null;
+}
+
+// Récupérer les réservations du coiffeur connecté pour aujourd'hui
+export async function getCoiffeurTodayBookings(): Promise<BookingWithDetails[]> {
+  const coiffeurId = await getMyCoiffeurId();
+  if (!coiffeurId) return [];
+
+  const today = new Date();
+  const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const endOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59);
+
+  const { data, error } = await supabase
+    .from("bookings")
+    .select(`
+      *,
+      client:profiles!bookings_client_id_fkey(*),
+      items:booking_items(*)
+    `)
+    .eq("coiffeur_id", coiffeurId)
+    .gte("start_at", startOfDay.toISOString())
+    .lte("start_at", endOfDay.toISOString())
+    .in("status", ["pending", "confirmed"])
+    .order("start_at", { ascending: true });
+
+  if (error) {
+    console.error("Error fetching today bookings:", error);
+    return [];
+  }
+
+  return data || [];
+}
+
+// Récupérer les réservations à venir du coiffeur (après maintenant)
+export async function getCoiffeurUpcomingBookings(): Promise<BookingWithDetails[]> {
+  const coiffeurId = await getMyCoiffeurId();
+  if (!coiffeurId) return [];
+
+  const now = new Date().toISOString();
+
+  const { data, error } = await supabase
+    .from("bookings")
+    .select(`
+      *,
+      client:profiles!bookings_client_id_fkey(*),
+      items:booking_items(*)
+    `)
+    .eq("coiffeur_id", coiffeurId)
+    .gte("start_at", now)
+    .in("status", ["pending", "confirmed"])
+    .order("start_at", { ascending: true })
+    .limit(20);
+
+  if (error) {
+    console.error("Error fetching upcoming bookings:", error);
+    return [];
+  }
+
+  return data || [];
+}
+
+// Récupérer les réservations passées du coiffeur
+export async function getCoiffeurPastBookings(): Promise<BookingWithDetails[]> {
+  const coiffeurId = await getMyCoiffeurId();
+  if (!coiffeurId) return [];
+
+  const now = new Date().toISOString();
+
+  const { data, error } = await supabase
+    .from("bookings")
+    .select(`
+      *,
+      client:profiles!bookings_client_id_fkey(*),
+      items:booking_items(*)
+    `)
+    .eq("coiffeur_id", coiffeurId)
+    .lte("end_at", now)
+    .order("start_at", { ascending: false })
+    .limit(50);
+
+  if (error) {
+    console.error("Error fetching past bookings:", error);
+    return [];
+  }
+
+  return data || [];
+}
+
+// Récupérer les réservations par date spécifique
+export async function getCoiffeurBookingsByDate(date: Date): Promise<BookingWithDetails[]> {
+  const coiffeurId = await getMyCoiffeurId();
+  if (!coiffeurId) return [];
+
+  const startOfDay = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const endOfDay = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59);
+
+  const { data, error } = await supabase
+    .from("bookings")
+    .select(`
+      *,
+      client:profiles!bookings_client_id_fkey(*),
+      items:booking_items(*)
+    `)
+    .eq("coiffeur_id", coiffeurId)
+    .gte("start_at", startOfDay.toISOString())
+    .lte("start_at", endOfDay.toISOString())
+    .neq("status", "cancelled")
+    .order("start_at", { ascending: true });
+
+  if (error) {
+    console.error("Error fetching bookings by date:", error);
+    return [];
+  }
+
+  return data || [];
+}
+
+// Récupérer les réservations en attente (pending) pour le coiffeur
+export async function getCoiffeurPendingBookings(): Promise<BookingWithDetails[]> {
+  const coiffeurId = await getMyCoiffeurId();
+  if (!coiffeurId) return [];
+
+  const { data, error } = await supabase
+    .from("bookings")
+    .select(`
+      *,
+      client:profiles!bookings_client_id_fkey(*),
+      items:booking_items(*)
+    `)
+    .eq("coiffeur_id", coiffeurId)
+    .eq("status", "pending")
+    .order("start_at", { ascending: true });
+
+  if (error) {
+    console.error("Error fetching pending bookings:", error);
+    return [];
+  }
+
+  return data || [];
+}
+
+// ============ ACTIONS COIFFEUR SUR RÉSERVATIONS ============
+
+// Accepter une réservation
+export async function acceptBooking(bookingId: string): Promise<boolean> {
+  const { error } = await supabase
+    .from("bookings")
+    .update({ 
+      status: "confirmed",
+      updated_at: new Date().toISOString()
+    })
+    .eq("id", bookingId)
+    .eq("status", "pending");
+
+  if (error) {
+    console.error("Error accepting booking:", error);
+    return false;
+  }
+
+  return true;
+}
+
+// Refuser une réservation
+export async function declineBooking(bookingId: string, reason?: string): Promise<boolean> {
+  const { data: { user } } = await supabase.auth.getUser();
+
+  const { error } = await supabase
+    .from("bookings")
+    .update({ 
+      status: "cancelled",
+      cancelled_at: new Date().toISOString(),
+      cancelled_by: user?.id,
+      cancellation_reason: reason || "Refusé par le coiffeur",
+      updated_at: new Date().toISOString()
+    })
+    .eq("id", bookingId)
+    .eq("status", "pending");
+
+  if (error) {
+    console.error("Error declining booking:", error);
+    return false;
+  }
+
+  return true;
+}
+
+// Marquer une réservation comme terminée
+export async function completeBooking(bookingId: string): Promise<boolean> {
+  const { error } = await supabase
+    .from("bookings")
+    .update({ 
+      status: "completed",
+      updated_at: new Date().toISOString()
+    })
+    .eq("id", bookingId)
+    .eq("status", "confirmed");
+
+  if (error) {
+    console.error("Error completing booking:", error);
+    return false;
+  }
+
+  return true;
+}
+
+// Marquer un client comme absent (no show)
+export async function markNoShow(bookingId: string): Promise<boolean> {
+  const { error } = await supabase
+    .from("bookings")
+    .update({ 
+      status: "no_show",
+      updated_at: new Date().toISOString()
+    })
+    .eq("id", bookingId);
+
+  if (error) {
+    console.error("Error marking no show:", error);
+    return false;
+  }
+
+  return true;
+}
+
+// ============ STATISTIQUES COIFFEUR ============
+
+export interface CoiffeurStats {
+  todayBookings: number;
+  todayRevenue: number;
+  weekRevenue: number;
+  monthRevenue: number;
+  totalClients: number;
+  completedBookings: number;
+  pendingBookings: number;
+}
+
+// Récupérer les statistiques du coiffeur connecté
+export async function getCoiffeurStats(): Promise<CoiffeurStats> {
+  const defaultStats: CoiffeurStats = {
+    todayBookings: 0,
+    todayRevenue: 0,
+    weekRevenue: 0,
+    monthRevenue: 0,
+    totalClients: 0,
+    completedBookings: 0,
+    pendingBookings: 0,
+  };
+
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return defaultStats;
+
+  const { data: coiffeur } = await supabase
+    .from("coiffeurs")
+    .select("id, bookings_completed")
+    .eq("profile_id", user.id)
+    .single();
+
+  if (!coiffeur) return defaultStats;
+
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  
+  // Début de la semaine (lundi)
+  const startOfWeek = new Date(startOfToday);
+  const dayOfWeek = startOfWeek.getDay();
+  const diff = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+  startOfWeek.setDate(startOfWeek.getDate() + diff);
+  
+  // Début du mois
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+
+  // RDV aujourd'hui (confirmés)
+  const { data: todayData } = await supabase
+    .from("bookings")
+    .select("total_cents")
+    .eq("coiffeur_id", coiffeur.id)
+    .gte("start_at", startOfToday.toISOString())
+    .in("status", ["confirmed", "completed"]);
+
+  // Revenus semaine (complétés seulement)
+  const { data: weekData } = await supabase
+    .from("bookings")
+    .select("total_cents")
+    .eq("coiffeur_id", coiffeur.id)
+    .gte("start_at", startOfWeek.toISOString())
+    .eq("status", "completed");
+
+  // Revenus mois (complétés seulement)
+  const { data: monthData } = await supabase
+    .from("bookings")
+    .select("total_cents")
+    .eq("coiffeur_id", coiffeur.id)
+    .gte("start_at", startOfMonth.toISOString())
+    .eq("status", "completed");
+
+  // Clients uniques (sur tous les RDV complétés)
+  const { data: clientsData } = await supabase
+    .from("bookings")
+    .select("client_id")
+    .eq("coiffeur_id", coiffeur.id)
+    .eq("status", "completed");
+
+  // Compteur de clients uniques
+  const uniqueClients = new Set(clientsData?.map(b => b.client_id) || []);
+
+  // RDV en attente
+  const { count: pendingCount } = await supabase
+    .from("bookings")
+    .select("id", { count: "exact", head: true })
+    .eq("coiffeur_id", coiffeur.id)
+    .eq("status", "pending");
+
+  const todayBookings = todayData?.length || 0;
+  const todayRevenue = todayData?.reduce((sum, b) => sum + (b.total_cents || 0), 0) || 0;
+  const weekRevenue = weekData?.reduce((sum, b) => sum + (b.total_cents || 0), 0) || 0;
+  const monthRevenue = monthData?.reduce((sum, b) => sum + (b.total_cents || 0), 0) || 0;
+
+  return {
+    todayBookings,
+    todayRevenue,
+    weekRevenue,
+    monthRevenue,
+    totalClients: uniqueClients.size,
+    completedBookings: coiffeur.bookings_completed || 0,
+    pendingBookings: pendingCount || 0,
+  };
+}
+
+// Vérifier si une date a des RDV (pour afficher un point sur le calendrier)
+export async function getCoiffeurDatesWithBookings(
+  startDate: Date,
+  endDate: Date
+): Promise<string[]> {
+  const coiffeurId = await getMyCoiffeurId();
+  if (!coiffeurId) return [];
+
+  const { data, error } = await supabase
+    .from("bookings")
+    .select("start_at")
+    .eq("coiffeur_id", coiffeurId)
+    .gte("start_at", startDate.toISOString())
+    .lte("start_at", endDate.toISOString())
+    .neq("status", "cancelled");
+
+  if (error) {
+    console.error("Error fetching dates with bookings:", error);
+    return [];
+  }
+
+  // Extraire les dates uniques (format YYYY-MM-DD)
+  const dates = new Set<string>();
+  data?.forEach(booking => {
+    const date = new Date(booking.start_at);
+    const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+    dates.add(dateStr);
+  });
+
+  return Array.from(dates);
 }

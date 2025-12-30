@@ -9,3 +9,4 @@ export { default as ProductCard } from "./ProductCard";
 export { default as SalonCard } from "./SalonCard";
 export { default as FilterChips } from "./FilterChips";
 export { default as RoleToggle } from "./RoleToggle";
+export { NotificationBell, NotificationBadge } from "./NotificationBell";

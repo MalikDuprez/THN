@@ -8,18 +8,26 @@ import {
   StyleSheet,
   NativeSyntheticEvent,
   NativeScrollEvent,
+  ActivityIndicator,
+  Alert,
+  RefreshControl,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useRef, useState } from "react";
+import { useRef, useState, useEffect, useCallback } from "react";
 import { useRouter } from "expo-router";
 import { useScrollContext } from "./_layout";
-import { useBookingStore, BookingItem, BookingStatus } from "@/stores/bookingStore";
-import { useOrderStore, OrderItem, OrderStatus } from "@/stores/orderStore";
 import { ROUTES } from "@/constants/routes";
+import { 
+  getUpcomingBookings, 
+  getPastBookings, 
+  cancelBooking 
+} from "@/api/bookings";
+import type { BookingWithDetails } from "@/types/database";
+import { formatPriceShort } from "@/types/database";
 
 // ============================================
-// THEME - Style Premium (Header noir)
+// THEME
 // ============================================
 const theme = {
   black: "#000000",
@@ -40,240 +48,95 @@ const theme = {
 };
 
 type TabType = "active" | "upcoming" | "past";
-type PastFilterType = "all" | "bookings" | "orders";
-
-// ============================================
-// DONNÉES MOCK POUR DÉMO
-// ============================================
-const MOCK_ACTIVE_BOOKING: BookingItem = {
-  id: "mock-active-1",
-  inspiration: {
-    id: "insp-1",
-    title: "Dégradé Américain",
-    image: "https://images.unsplash.com/photo-1621605815971-fbc98d665033?w=400",
-    category: "Homme",
-    duration: "45 min",
-    price: 35,
-  },
-  coiffeur: {
-    id: "coif-1",
-    name: "Marco Rossi",
-    salon: "Barbershop Marco",
-    image: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200",
-    rating: 4.8,
-    phone: "+33 6 12 34 56 78",
-  },
-  date: "2025-01-15",
-  dateFormatted: "15 Jan 2025",
-  time: "14:30",
-  location: "domicile",
-  address: "12 Rue de la Paix, 75002 Paris",
-  serviceFee: 10,
-  status: "hairdresser_coming",
-  rated: false,
-  createdAt: new Date(),
-  updatedAt: new Date(),
-};
-
-const MOCK_UPCOMING_BOOKINGS: BookingItem[] = [
-  {
-    id: "mock-upcoming-1",
-    inspiration: {
-      id: "insp-2",
-      title: "Balayage Naturel",
-      image: "https://images.unsplash.com/photo-1522337360788-8b13dee7a37e?w=400",
-      category: "Femme",
-      duration: "2h",
-      price: 120,
-    },
-    coiffeur: {
-      id: "coif-2",
-      name: "Sophie Martin",
-      salon: "Salon Élégance",
-      image: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=200",
-      rating: 4.9,
-    },
-    date: "2025-01-18",
-    dateFormatted: "18 Jan 2025",
-    time: "10:00",
-    location: "salon",
-    address: "45 Avenue Montaigne, 75008 Paris",
-    status: "confirmed",
-    rated: false,
-    createdAt: new Date(),
-    updatedAt: new Date(),
-  },
-];
-
-const MOCK_PAST_BOOKINGS: BookingItem[] = [
-  {
-    id: "mock-past-1",
-    inspiration: {
-      id: "insp-3",
-      title: "Coupe Homme Classic",
-      image: "https://images.unsplash.com/photo-1503951914875-452162b0f3f1?w=400",
-      category: "Homme",
-      duration: "30 min",
-      price: 28,
-    },
-    coiffeur: {
-      id: "coif-3",
-      name: "Thomas Dubois",
-      salon: "Le Figaro",
-      image: "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=200",
-      rating: 4.7,
-    },
-    date: "2025-01-10",
-    dateFormatted: "10 Jan 2025",
-    time: "16:00",
-    location: "salon",
-    address: "8 Rue du Faubourg, 75009 Paris",
-    status: "completed",
-    rated: true,
-    createdAt: new Date(),
-    updatedAt: new Date(),
-  },
-  {
-    id: "mock-past-2",
-    inspiration: {
-      id: "insp-4",
-      title: "Coloration Châtain",
-      image: "https://images.unsplash.com/photo-1560869713-da86bd4d0b69?w=400",
-      category: "Femme",
-      duration: "1h30",
-      price: 85,
-    },
-    coiffeur: {
-      id: "coif-4",
-      name: "Julie Petit",
-      salon: "Hair Studio",
-      image: "https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=200",
-      rating: 4.6,
-    },
-    date: "2025-01-05",
-    dateFormatted: "5 Jan 2025",
-    time: "11:00",
-    location: "domicile",
-    address: "12 Rue de la Paix, 75002 Paris",
-    serviceFee: 10,
-    status: "completed",
-    rated: false,
-    createdAt: new Date(),
-    updatedAt: new Date(),
-  },
-];
-
-const MOCK_ACTIVE_ORDER: OrderItem = {
-  id: "mock-order-1",
-  products: [
-    {
-      id: "prod-1",
-      name: "Shampooing Kérastase Nutritive",
-      image: "https://images.unsplash.com/photo-1526947425960-945c6e72858f?w=200",
-      price: 28,
-      quantity: 1,
-    },
-    {
-      id: "prod-2",
-      name: "Masque Réparateur Olaplex",
-      image: "https://images.unsplash.com/photo-1608248543803-ba4f8c70ae0b?w=200",
-      price: 32,
-      quantity: 2,
-    },
-  ],
-  status: "shipped",
-  deliveryMethod: "home",
-  deliveryAddress: "12 Rue de la Paix, 75002 Paris",
-  deliveryPrice: 4.90,
-  subtotal: 92,
-  total: 96.90,
-  trackingNumber: "FR123456789",
-  estimatedDelivery: "17 Jan 2025",
-  createdAt: new Date(),
-  updatedAt: new Date(),
-};
-
-const MOCK_PAST_ORDERS: OrderItem[] = [
-  {
-    id: "mock-order-2",
-    products: [
-      {
-        id: "prod-3",
-        name: "Huile Capillaire Moroccanoil",
-        image: "https://images.unsplash.com/photo-1599305090598-fe179d501227?w=200",
-        price: 45,
-        quantity: 1,
-      },
-    ],
-    status: "delivered",
-    deliveryMethod: "relay",
-    deliveryAddress: "Relais Colis - Tabac Le Central",
-    deliveryPrice: 2.90,
-    subtotal: 45,
-    total: 47.90,
-    createdAt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
-    updatedAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000),
-  },
-];
 
 // ============================================
 // HELPERS
 // ============================================
+type BookingStatus = "pending" | "confirmed" | "completed" | "cancelled" | "no_show";
+
 const getBookingStatusConfig = (status: BookingStatus) => {
   switch (status) {
     case "pending":
       return { label: "En attente", color: theme.warning, bgColor: theme.warningLight, icon: "time-outline" };
     case "confirmed":
       return { label: "Confirmé", color: theme.success, bgColor: theme.successLight, icon: "checkmark-circle-outline" };
-    case "hairdresser_coming":
-      return { label: "En route", color: theme.info, bgColor: theme.infoLight, icon: "navigate-outline" };
-    case "in_progress":
-      return { label: "En cours", color: theme.info, bgColor: theme.infoLight, icon: "cut-outline" };
     case "completed":
       return { label: "Terminé", color: theme.success, bgColor: theme.successLight, icon: "checkmark-done-outline" };
     case "cancelled":
       return { label: "Annulé", color: theme.error, bgColor: theme.errorLight, icon: "close-circle-outline" };
+    case "no_show":
+      return { label: "Absent", color: theme.error, bgColor: theme.errorLight, icon: "alert-circle-outline" };
     default:
       return { label: status, color: theme.textMuted, bgColor: theme.card, icon: "help-outline" };
   }
 };
 
-const getOrderStatusConfig = (status: OrderStatus) => {
-  switch (status) {
-    case "preparing":
-      return { label: "En préparation", color: theme.warning, bgColor: theme.warningLight, icon: "cube-outline" };
-    case "shipped":
-      return { label: "Expédié", color: theme.info, bgColor: theme.infoLight, icon: "paper-plane-outline" };
-    case "out_for_delivery":
-      return { label: "En livraison", color: theme.info, bgColor: theme.infoLight, icon: "bicycle-outline" };
-    case "delivered":
-      return { label: "Livré", color: theme.success, bgColor: theme.successLight, icon: "checkmark-done-outline" };
-    case "cancelled":
-      return { label: "Annulé", color: theme.error, bgColor: theme.errorLight, icon: "close-circle-outline" };
-    default:
-      return { label: status, color: theme.textMuted, bgColor: theme.card, icon: "help-outline" };
-  }
+const formatDate = (dateString: string) => {
+  const date = new Date(dateString);
+  return date.toLocaleDateString("fr-FR", { 
+    weekday: "long", 
+    day: "numeric", 
+    month: "long" 
+  });
+};
+
+const formatTime = (dateString: string) => {
+  const date = new Date(dateString);
+  return date.toLocaleTimeString("fr-FR", { 
+    hour: "2-digit", 
+    minute: "2-digit" 
+  });
+};
+
+const formatDateShort = (dateString: string) => {
+  const date = new Date(dateString);
+  return date.toLocaleDateString("fr-FR", { 
+    day: "numeric", 
+    month: "short",
+    year: "numeric"
+  });
+};
+
+// Vérifie si une réservation est "en cours" (aujourd'hui et dans les 2 prochaines heures)
+const isActiveBooking = (booking: BookingWithDetails) => {
+  const now = new Date();
+  const bookingStart = new Date(booking.start_at);
+  const bookingEnd = new Date(booking.end_at);
+  
+  // En cours si : déjà commencé mais pas terminé, OU commence dans moins de 2h
+  const twoHoursFromNow = new Date(now.getTime() + 2 * 60 * 60 * 1000);
+  
+  return (
+    (bookingStart <= now && bookingEnd >= now) || // En cours
+    (bookingStart > now && bookingStart <= twoHoursFromNow) // Commence bientôt
+  );
 };
 
 // ============================================
 // COMPOSANTS
 // ============================================
 
-// Badge de statut
 const StatusBadge = ({ label, color, bgColor }: { label: string; color: string; bgColor: string }) => (
   <View style={[styles.statusBadge, { backgroundColor: bgColor }]}>
     <Text style={[styles.statusText, { color }]}>{label}</Text>
   </View>
 );
 
-// Carte RDV En cours
-const ActiveBookingCard = ({ booking, onContact, onCancel }: { 
-  booking: BookingItem; 
+// Carte RDV En cours (style premium)
+const ActiveBookingCard = ({ 
+  booking, 
+  onContact, 
+  onCancel 
+}: { 
+  booking: BookingWithDetails; 
   onContact: () => void;
   onCancel: () => void;
 }) => {
-  const statusConfig = getBookingStatusConfig(booking.status);
-  
+  const statusConfig = getBookingStatusConfig(booking.status as BookingStatus);
+  const coiffeur = booking.coiffeur;
+  const items = booking.items || [];
+  const firstServiceName = items.length > 0 ? items[0].service_name : "Prestation";
+
   return (
     <View style={styles.activeCard}>
       <View style={styles.activeCardHeader}>
@@ -285,30 +148,44 @@ const ActiveBookingCard = ({ booking, onContact, onCancel }: {
       </View>
       
       <View style={styles.activeCardContent}>
-        <Image source={{ uri: booking.coiffeur.image }} style={styles.activeCoiffeurImage} />
+        {coiffeur?.avatar_url ? (
+          <Image source={{ uri: coiffeur.avatar_url }} style={styles.activeCoiffeurImage} />
+        ) : (
+          <View style={[styles.activeCoiffeurImage, styles.avatarPlaceholder]}>
+            <Ionicons name="person" size={24} color={theme.textMuted} />
+          </View>
+        )}
         <View style={styles.activeCardInfo}>
-          <Text style={styles.activeCoiffeurName}>{booking.coiffeur.name}</Text>
-          <Text style={styles.activeServiceName}>{booking.inspiration.title}</Text>
+          <Text style={styles.activeCoiffeurName}>{coiffeur?.display_name || "Coiffeur"}</Text>
+          <Text style={styles.activeServiceName}>
+            {items.length > 1 
+              ? `${firstServiceName} +${items.length - 1} autre${items.length > 2 ? "s" : ""}`
+              : firstServiceName
+            }
+          </Text>
           <View style={styles.activeMetaRow}>
-            <Ionicons name={booking.location === "domicile" ? "home-outline" : "location-outline"} size={14} color={theme.textMuted} />
+            <Ionicons 
+              name={booking.location === "domicile" ? "home-outline" : "storefront-outline"} 
+              size={14} 
+              color={theme.textMuted} 
+            />
             <Text style={styles.activeMetaText}>
-              {booking.location === "domicile" ? "À domicile" : booking.coiffeur.salon}
+              {booking.location === "domicile" ? "À domicile" : "En salon"}
             </Text>
           </View>
         </View>
       </View>
 
-      {booking.status === "hairdresser_coming" && (
-        <View style={styles.trackingSection}>
-          <View style={styles.trackingInfo}>
-            <Ionicons name="navigate" size={20} color={theme.info} />
-            <Text style={styles.trackingText}>Arrivée estimée dans ~15 min</Text>
-          </View>
-          <View style={styles.trackingBar}>
-            <View style={[styles.trackingProgress, { width: "60%" }]} />
-          </View>
+      <View style={styles.activeTimeSection}>
+        <View style={styles.activeTimeItem}>
+          <Ionicons name="calendar-outline" size={16} color={theme.info} />
+          <Text style={styles.activeTimeText}>{formatDate(booking.start_at)}</Text>
         </View>
-      )}
+        <View style={styles.activeTimeItem}>
+          <Ionicons name="time-outline" size={16} color={theme.info} />
+          <Text style={styles.activeTimeText}>{formatTime(booking.start_at)}</Text>
+        </View>
+      </View>
 
       <View style={styles.activeCardActions}>
         <Pressable style={styles.activeActionBtn} onPress={onContact}>
@@ -324,147 +201,145 @@ const ActiveBookingCard = ({ booking, onContact, onCancel }: {
   );
 };
 
-// Carte Commande En cours
-const ActiveOrderCard = ({ order, onTrack }: { order: OrderItem; onTrack: () => void }) => {
-  const statusConfig = getOrderStatusConfig(order.status);
-  
-  return (
-    <View style={styles.activeCard}>
-      <View style={styles.activeCardHeader}>
-        <View style={styles.activeCardType}>
-          <Ionicons name="cube" size={16} color={theme.text} />
-          <Text style={styles.activeCardTypeText}>Commande</Text>
-        </View>
-        <StatusBadge {...statusConfig} />
-      </View>
-      
-      <View style={styles.orderProductsRow}>
-        {order.products.slice(0, 3).map((product, index) => (
-          <Image
-            key={product.id}
-            source={{ uri: product.image }}
-            style={[
-              styles.orderProductThumb,
-              index > 0 && { marginLeft: -12 },
-            ]}
-          />
-        ))}
-        <Text style={styles.orderProductCount}>
-          {order.products.length} article{order.products.length > 1 ? "s" : ""}
-        </Text>
-      </View>
-
-      <View style={styles.deliveryInfo}>
-        <Ionicons 
-          name={order.deliveryMethod === "home" ? "home-outline" : "location-outline"} 
-          size={14} 
-          color={theme.textMuted} 
-        />
-        <Text style={styles.deliveryText} numberOfLines={1}>
-          {order.deliveryAddress}
-        </Text>
-      </View>
-
-      {order.estimatedDelivery && (
-        <View style={styles.deliveryInfo}>
-          <Ionicons name="calendar-outline" size={14} color={theme.textMuted} />
-          <Text style={styles.deliveryText}>Livraison prévue le {order.estimatedDelivery}</Text>
-        </View>
-      )}
-
-      <Pressable style={styles.trackOrderBtn} onPress={onTrack}>
-        <Ionicons name="locate-outline" size={18} color="#FFF" />
-        <Text style={styles.trackOrderBtnText}>Suivre ma commande</Text>
-      </Pressable>
-    </View>
-  );
-};
-
-// Carte RDV À venir
-const UpcomingBookingCard = ({ booking, onModify, onCancel }: {
-  booking: BookingItem;
-  onModify: () => void;
+// Carte réservation à venir
+const UpcomingBookingCard = ({ 
+  booking, 
+  onCancel,
+  onPress,
+}: { 
+  booking: BookingWithDetails;
   onCancel: () => void;
+  onPress: () => void;
 }) => {
-  const statusConfig = getBookingStatusConfig(booking.status);
-  const totalPrice = booking.inspiration.price + (booking.serviceFee || 0);
-  
+  const statusConfig = getBookingStatusConfig(booking.status as BookingStatus);
+  const coiffeur = booking.coiffeur;
+  const items = booking.items || [];
+  const firstServiceName = items.length > 0 ? items[0].service_name : "Prestation";
+  const totalDuration = booking.total_duration_minutes || 0;
+
   return (
-    <View style={styles.upcomingCard}>
-      <Image source={{ uri: booking.inspiration.image }} style={styles.upcomingImage} />
+    <Pressable style={styles.upcomingCard} onPress={onPress}>
       <View style={styles.upcomingContent}>
         <View style={styles.upcomingHeader}>
-          <Text style={styles.upcomingSalon}>{booking.coiffeur.salon}</Text>
+          <Text style={styles.upcomingSalon}>
+            {coiffeur?.display_name || "Coiffeur"}
+          </Text>
           <StatusBadge {...statusConfig} />
         </View>
         
-        <Text style={styles.upcomingService}>{booking.inspiration.title}</Text>
+        <Text style={styles.upcomingService}>
+          {items.length > 1 
+            ? `${firstServiceName} +${items.length - 1} autre${items.length > 2 ? "s" : ""}`
+            : firstServiceName
+          }
+        </Text>
         
         <View style={styles.upcomingMeta}>
           <View style={styles.upcomingMetaItem}>
             <Ionicons name="calendar-outline" size={14} color={theme.textMuted} />
-            <Text style={styles.metaText}>{booking.dateFormatted}</Text>
+            <Text style={styles.metaText}>{formatDate(booking.start_at)}</Text>
           </View>
           <View style={styles.upcomingMetaItem}>
             <Ionicons name="time-outline" size={14} color={theme.textMuted} />
-            <Text style={styles.metaText}>{booking.time}</Text>
+            <Text style={styles.metaText}>{formatTime(booking.start_at)}</Text>
           </View>
           <View style={styles.upcomingMetaItem}>
-            <Ionicons name={booking.location === "domicile" ? "home-outline" : "location-outline"} size={14} color={theme.textMuted} />
-            <Text style={styles.metaText}>{booking.location === "domicile" ? "À domicile" : "En salon"}</Text>
+            <Ionicons name="hourglass-outline" size={14} color={theme.textMuted} />
+            <Text style={styles.metaText}>{totalDuration} min</Text>
+          </View>
+        </View>
+
+        <View style={styles.upcomingMeta}>
+          <View style={styles.upcomingMetaItem}>
+            <Ionicons 
+              name={booking.location === "domicile" ? "home-outline" : "storefront-outline"} 
+              size={14} 
+              color={theme.textMuted} 
+            />
+            <Text style={styles.metaText}>
+              {booking.location === "domicile" ? "À domicile" : "En salon"}
+            </Text>
           </View>
         </View>
 
         <View style={styles.upcomingCoiffeur}>
-          <Image source={{ uri: booking.coiffeur.image }} style={styles.coiffeurAvatar} />
+          {coiffeur?.avatar_url ? (
+            <Image source={{ uri: coiffeur.avatar_url }} style={styles.coiffeurAvatar} />
+          ) : (
+            <View style={[styles.coiffeurAvatar, styles.coiffeurAvatarPlaceholder]}>
+              <Ionicons name="person" size={18} color={theme.textMuted} />
+            </View>
+          )}
           <View style={styles.coiffeurInfo}>
-            <Text style={styles.coiffeurName}>{booking.coiffeur.name}</Text>
+            <Text style={styles.coiffeurName}>{coiffeur?.display_name || "Coiffeur"}</Text>
             <View style={styles.ratingRow}>
               <Ionicons name="star" size={12} color="#FFB800" />
-              <Text style={styles.ratingText}>{booking.coiffeur.rating}</Text>
+              <Text style={styles.ratingText}>
+                {Number(coiffeur?.rating || 0).toFixed(1)} ({coiffeur?.reviews_count || 0} avis)
+              </Text>
             </View>
           </View>
-          <Text style={styles.priceText}>{totalPrice}€</Text>
+          <Text style={styles.priceText}>{formatPriceShort(booking.total_cents)}</Text>
         </View>
-        
+
         <View style={styles.upcomingActions}>
-          <Pressable style={[styles.actionBtn, styles.actionBtnOutline]} onPress={onCancel}>
+          <Pressable 
+            style={[styles.actionBtn, styles.actionBtnOutline]} 
+            onPress={onCancel}
+          >
             <Text style={styles.actionBtnTextOutline}>Annuler</Text>
           </Pressable>
-          <Pressable style={styles.actionBtn} onPress={onModify}>
-            <Text style={styles.actionBtnText}>Modifier</Text>
+          <Pressable style={styles.actionBtn} onPress={onPress}>
+            <Text style={styles.actionBtnText}>Voir détails</Text>
           </Pressable>
         </View>
       </View>
-    </View>
+    </Pressable>
   );
 };
 
-// Carte RDV Passé
-const PastBookingCard = ({ booking, onRate, onRebook }: {
-  booking: BookingItem;
-  onRate: () => void;
+// Carte réservation passée
+const PastBookingCard = ({ 
+  booking,
+  onRebook,
+}: { 
+  booking: BookingWithDetails;
   onRebook: () => void;
 }) => {
+  const statusConfig = getBookingStatusConfig(booking.status as BookingStatus);
+  const coiffeur = booking.coiffeur;
+  const items = booking.items || [];
+  const firstServiceName = items.length > 0 ? items[0].service_name : "Prestation";
   const isCancelled = booking.status === "cancelled";
-  
+
   return (
     <View style={[styles.pastCard, isCancelled && styles.pastCardCancelled]}>
-      <Image source={{ uri: booking.inspiration.image }} style={styles.pastImage} />
+      {coiffeur?.avatar_url ? (
+        <Image source={{ uri: coiffeur.avatar_url }} style={styles.pastImage} />
+      ) : (
+        <View style={[styles.pastImage, styles.pastImagePlaceholder]}>
+          <Ionicons name="cut" size={28} color={theme.textMuted} />
+        </View>
+      )}
+      
       <View style={styles.pastContent}>
         <View style={styles.pastHeader}>
           <View style={styles.pastTypeIcon}>
-            <Ionicons name="cut" size={12} color={theme.textSecondary} />
+            <Ionicons name="cut" size={10} color={theme.textSecondary} />
           </View>
-          <Text style={styles.pastTitle}>{booking.inspiration.title}</Text>
+          <StatusBadge {...statusConfig} />
         </View>
-        <Text style={styles.pastSubtitle}>{booking.coiffeur.name} • {booking.coiffeur.salon}</Text>
-        <Text style={styles.pastMeta}>{booking.dateFormatted} à {booking.time}</Text>
+        
+        <Text style={styles.pastTitle}>{firstServiceName}</Text>
+        <Text style={styles.pastSubtitle}>{coiffeur?.display_name || "Coiffeur"}</Text>
+        <Text style={styles.pastMeta}>
+          {formatDateShort(booking.start_at)} • {formatPriceShort(booking.total_cents)}
+        </Text>
         
         {!isCancelled && (
           <View style={styles.pastActions}>
-            {!booking.rated && (
-              <Pressable style={styles.rateBtn} onPress={onRate}>
+            {!booking.client_has_reviewed && (
+              <Pressable style={styles.rateBtn}>
                 <Ionicons name="star-outline" size={14} color={theme.text} />
                 <Text style={styles.rateBtnText}>Noter</Text>
               </Pressable>
@@ -480,300 +355,274 @@ const PastBookingCard = ({ booking, onRate, onRebook }: {
   );
 };
 
-// Carte Commande Passée
-const PastOrderCard = ({ order }: { order: OrderItem }) => {
-  const statusConfig = getOrderStatusConfig(order.status);
-  const isCancelled = order.status === "cancelled";
-  const productCount = order.products.reduce((sum, p) => sum + p.quantity, 0);
-  
-  return (
-    <View style={[styles.pastCard, isCancelled && styles.pastCardCancelled]}>
-      <View style={styles.pastOrderImages}>
-        {order.products.slice(0, 4).map((product) => (
-          <Image key={product.id} source={{ uri: product.image }} style={styles.pastOrderThumb} />
-        ))}
-      </View>
-      <View style={styles.pastContent}>
-        <View style={styles.pastHeader}>
-          <View style={styles.pastTypeIcon}>
-            <Ionicons name="cube" size={12} color={theme.textSecondary} />
-          </View>
-          <Text style={styles.pastTitle}>{productCount} article{productCount > 1 ? "s" : ""}</Text>
-        </View>
-        <Text style={styles.pastSubtitle}>{order.total.toFixed(2)}€</Text>
-        <Text style={styles.pastMeta}>{statusConfig.label}</Text>
-      </View>
+// État vide
+const EmptyState = ({ 
+  icon, 
+  title, 
+  subtitle, 
+  buttonText, 
+  onPress 
+}: { 
+  icon: string; 
+  title: string; 
+  subtitle: string; 
+  buttonText?: string; 
+  onPress?: () => void;
+}) => (
+  <View style={styles.emptyState}>
+    <View style={styles.emptyIconContainer}>
+      <Ionicons name={icon as any} size={48} color={theme.textMuted} />
     </View>
-  );
-};
-
-// Empty State
-const EmptyState = ({ tab, onAction }: { tab: TabType; onAction: () => void }) => {
-  const content = {
-    active: {
-      icon: "cut-outline",
-      title: "Aucune activité en cours",
-      subtitle: "Vos rendez-vous et commandes en cours apparaîtront ici",
-      buttonText: "Trouver l'inspiration",
-    },
-    upcoming: {
-      icon: "calendar-outline",
-      title: "Aucun rendez-vous à venir",
-      subtitle: "Réservez votre prochain rendez-vous dès maintenant",
-      buttonText: "Réserver",
-    },
-    past: {
-      icon: "time-outline",
-      title: "Aucun historique",
-      subtitle: "Vos rendez-vous et commandes passés apparaîtront ici",
-      buttonText: "Découvrir",
-    },
-  };
-
-  const { icon, title, subtitle, buttonText } = content[tab];
-
-  return (
-    <View style={styles.emptyState}>
-      <View style={styles.emptyIconContainer}>
-        <Ionicons name={icon as any} size={48} color={theme.textMuted} />
-      </View>
-      <Text style={styles.emptyTitle}>{title}</Text>
-      <Text style={styles.emptySubtitle}>{subtitle}</Text>
-      <Pressable style={styles.emptyButton} onPress={onAction}>
+    <Text style={styles.emptyTitle}>{title}</Text>
+    <Text style={styles.emptySubtitle}>{subtitle}</Text>
+    {buttonText && onPress && (
+      <Pressable style={styles.emptyButton} onPress={onPress}>
         <Text style={styles.emptyButtonText}>{buttonText}</Text>
       </Pressable>
-    </View>
-  );
-};
+    )}
+  </View>
+);
 
 // ============================================
-// MAIN COMPONENT
+// ÉCRAN PRINCIPAL
 // ============================================
 export default function ActivityScreen() {
-  const insets = useSafeAreaInsets();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { setIsScrolling } = useScrollContext();
   
   const [activeTab, setActiveTab] = useState<TabType>("active");
-  const [pastFilter, setPastFilter] = useState<PastFilterType>("all");
-  
-  // Stores
-  const { 
-    getActiveBookings, 
-    getUpcomingBookings, 
-    getPastBookings,
-    cancelBooking,
-    rateBooking,
-  } = useBookingStore();
-  
-  const { 
-    getActiveOrders, 
-    getPastOrders,
-  } = useOrderStore();
+  const [upcomingBookings, setUpcomingBookings] = useState<BookingWithDetails[]>([]);
+  const [pastBookings, setPastBookings] = useState<BookingWithDetails[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
-  // Combiner données mock + store pour démo
-  const activeBookings = [...getActiveBookings(), MOCK_ACTIVE_BOOKING];
-  const activeOrders = [...getActiveOrders(), MOCK_ACTIVE_ORDER];
-  const upcomingBookings = [...getUpcomingBookings(), ...MOCK_UPCOMING_BOOKINGS];
-  const pastBookings = [...getPastBookings(), ...MOCK_PAST_BOOKINGS];
-  const pastOrders = [...getPastOrders(), ...MOCK_PAST_ORDERS];
-
-  // Scroll handling
   const lastScrollY = useRef(0);
   const scrollTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const loadBookings = useCallback(async () => {
+    try {
+      const [upcoming, past] = await Promise.all([
+        getUpcomingBookings(),
+        getPastBookings(),
+      ]);
+      setUpcomingBookings(upcoming);
+      setPastBookings(past);
+    } catch (error) {
+      console.error("Error loading bookings:", error);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadBookings();
+  }, [loadBookings]);
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    loadBookings();
+  }, [loadBookings]);
+
+  // Séparer les réservations "en cours" des "à venir"
+  const activeBookings = upcomingBookings.filter(isActiveBooking);
+  const futureBookings = upcomingBookings.filter(b => !isActiveBooking(b));
 
   const handleScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
     const currentY = event.nativeEvent.contentOffset.y;
     const isGoingDown = currentY > lastScrollY.current;
     const isGoingUp = currentY < lastScrollY.current;
-    
-    if (scrollTimeout.current) clearTimeout(scrollTimeout.current);
-    
+
+    if (scrollTimeout.current) {
+      clearTimeout(scrollTimeout.current);
+    }
+
     if (isGoingDown && currentY > 30) {
       setIsScrolling(true);
     } else if (isGoingUp) {
       setIsScrolling(false);
     }
-    
-    scrollTimeout.current = setTimeout(() => setIsScrolling(false), 800);
+
+    scrollTimeout.current = setTimeout(() => {
+      setIsScrolling(false);
+    }, 800);
+
     lastScrollY.current = currentY;
   };
 
-  // Handlers
-  const handleCancelBooking = (id: string) => cancelBooking(id);
-  const handleRateBooking = (id: string) => rateBooking(id);
-  const handleRebook = () => router.push(ROUTES.CLIENT.HOME);
-  const handleGoToInspiration = () => router.push(ROUTES.CLIENT.HOME);
+  const handleCancelBooking = (bookingId: string) => {
+    Alert.alert(
+      "Annuler la réservation",
+      "Êtes-vous sûr de vouloir annuler cette réservation ?",
+      [
+        { text: "Non", style: "cancel" },
+        { 
+          text: "Oui, annuler", 
+          style: "destructive",
+          onPress: async () => {
+            const success = await cancelBooking(bookingId);
+            if (success) {
+              loadBookings();
+            } else {
+              Alert.alert("Erreur", "Impossible d'annuler la réservation");
+            }
+          }
+        },
+      ]
+    );
+  };
 
-  // Tabs config
-  const tabs: { key: TabType; label: string; icon: string; count: number }[] = [
-    { key: "active", label: "En cours", icon: "flash-outline", count: activeBookings.length + activeOrders.length },
-    { key: "upcoming", label: "À venir", icon: "calendar-outline", count: upcomingBookings.length },
-    { key: "past", label: "Passées", icon: "time-outline", count: pastBookings.length + pastOrders.length },
-  ];
+  const handleContact = (booking: BookingWithDetails) => {
+    // TODO: Implémenter l'appel ou le chat
+    Alert.alert("Contacter", `Appeler ${booking.coiffeur?.display_name || "le coiffeur"}`);
+  };
 
-  // Rendu du contenu selon l'onglet
-  const renderContent = () => {
-    switch (activeTab) {
-      case "active":
-        if (activeBookings.length === 0 && activeOrders.length === 0) {
-          return <EmptyState tab="active" onAction={handleGoToInspiration} />;
-        }
-        return (
-          <>
-            {activeBookings.map((booking) => (
-              <ActiveBookingCard
-                key={booking.id}
-                booking={booking}
-                onContact={() => {}}
-                onCancel={() => handleCancelBooking(booking.id)}
-              />
-            ))}
-            {activeOrders.map((order) => (
-              <ActiveOrderCard key={order.id} order={order} onTrack={() => {}} />
-            ))}
-          </>
-        );
+  const handleRebook = (booking: BookingWithDetails) => {
+    if (booking.coiffeur?.id) {
+      router.push(ROUTES.SHARED.COIFFEUR(booking.coiffeur.id));
+    }
+  };
 
-      case "upcoming":
-        if (upcomingBookings.length === 0) {
-          return <EmptyState tab="upcoming" onAction={handleGoToInspiration} />;
-        }
-        return (
-          <>
-            {upcomingBookings.map((booking) => (
-              <UpcomingBookingCard
-                key={booking.id}
-                booking={booking}
-                onModify={() => {}}
-                onCancel={() => handleCancelBooking(booking.id)}
-              />
-            ))}
-          </>
-        );
-
-      case "past":
-        if (pastBookings.length === 0 && pastOrders.length === 0) {
-          return <EmptyState tab="past" onAction={handleGoToInspiration} />;
-        }
-        
-        const showBookings = pastFilter === "all" || pastFilter === "bookings";
-        const showOrders = pastFilter === "all" || pastFilter === "orders";
-        
-        const combinedPastItems: Array<{ type: "booking" | "order"; data: BookingItem | OrderItem; date: Date }> = [];
-        
-        if (showBookings) {
-          pastBookings.forEach((booking) => {
-            combinedPastItems.push({ type: "booking", data: booking, date: new Date(booking.date) });
-          });
-        }
-        
-        if (showOrders) {
-          pastOrders.forEach((order) => {
-            combinedPastItems.push({ type: "order", data: order, date: order.createdAt });
-          });
-        }
-        
-        combinedPastItems.sort((a, b) => b.date.getTime() - a.date.getTime());
-        
-        return (
-          <>
-            <View style={styles.pastFiltersContainer}>
-              {[
-                { key: "all" as PastFilterType, label: "Tout" },
-                { key: "bookings" as PastFilterType, label: "Rendez-vous" },
-                { key: "orders" as PastFilterType, label: "Commandes" },
-              ].map((filter) => (
-                <Pressable
-                  key={filter.key}
-                  style={[
-                    styles.pastFilterChip,
-                    pastFilter === filter.key && styles.pastFilterChipActive,
-                  ]}
-                  onPress={() => setPastFilter(filter.key)}
-                >
-                  <Text
-                    style={[
-                      styles.pastFilterText,
-                      pastFilter === filter.key && styles.pastFilterTextActive,
-                    ]}
-                  >
-                    {filter.label}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
-
-            <View style={styles.pastListContainer}>
-              {combinedPastItems.map((item) => {
-                if (item.type === "booking") {
-                  const booking = item.data as BookingItem;
-                  return (
-                    <PastBookingCard
-                      key={booking.id}
-                      booking={booking}
-                      onRate={() => handleRateBooking(booking.id)}
-                      onRebook={handleRebook}
-                    />
-                  );
-                } else {
-                  const order = item.data as OrderItem;
-                  return <PastOrderCard key={order.id} order={order} />;
-                }
-              })}
-            </View>
-          </>
-        );
+  const handleViewDetails = (booking: BookingWithDetails) => {
+    if (booking.coiffeur?.id) {
+      router.push(ROUTES.SHARED.COIFFEUR(booking.coiffeur.id));
     }
   };
 
   return (
     <View style={styles.container}>
-      {/* HEADER NOIR */}
+      {/* Header */}
       <View style={[styles.header, { paddingTop: insets.top + 16 }]}>
         <Text style={styles.headerTitle}>Activité</Text>
         
-        {/* Tabs */}
         <View style={styles.tabsContainer}>
-          {tabs.map((tab) => (
-            <Pressable
-              key={tab.key}
-              style={[styles.tab, activeTab === tab.key && styles.tabActive]}
-              onPress={() => setActiveTab(tab.key)}
-            >
-              <Ionicons 
-                name={tab.icon as any} 
-                size={16} 
-                color={activeTab === tab.key ? theme.white : "rgba(255,255,255,0.5)"} 
-              />
-              <Text style={[styles.tabText, activeTab === tab.key && styles.tabTextActive]}>
-                {tab.label}
-              </Text>
-              {tab.count > 0 && (
-                <View style={[styles.tabBadge, activeTab === tab.key && styles.tabBadgeActive]}>
-                  <Text style={[styles.tabBadgeText, activeTab === tab.key && styles.tabBadgeTextActive]}>
-                    {tab.count}
-                  </Text>
-                </View>
-              )}
-            </Pressable>
-          ))}
+          <Pressable
+            style={[styles.tab, activeTab === "active" && styles.tabActive]}
+            onPress={() => setActiveTab("active")}
+          >
+            <Text style={[styles.tabText, activeTab === "active" && styles.tabTextActive]}>
+              En cours
+            </Text>
+            {activeBookings.length > 0 && (
+              <View style={[styles.tabBadge, styles.tabBadgeActive]}>
+                <Text style={styles.tabBadgeTextActive}>{activeBookings.length}</Text>
+              </View>
+            )}
+          </Pressable>
+
+          <Pressable
+            style={[styles.tab, activeTab === "upcoming" && styles.tabActive]}
+            onPress={() => setActiveTab("upcoming")}
+          >
+            <Text style={[styles.tabText, activeTab === "upcoming" && styles.tabTextActive]}>
+              À venir
+            </Text>
+            {futureBookings.length > 0 && (
+              <View style={styles.tabBadge}>
+                <Text style={styles.tabBadgeText}>{futureBookings.length}</Text>
+              </View>
+            )}
+          </Pressable>
+          
+          <Pressable
+            style={[styles.tab, activeTab === "past" && styles.tabActive]}
+            onPress={() => setActiveTab("past")}
+          >
+            <Text style={[styles.tabText, activeTab === "past" && styles.tabTextActive]}>
+              Historique
+            </Text>
+          </Pressable>
         </View>
       </View>
 
-      {/* CONTENU BLANC ARRONDI */}
+      {/* Content */}
       <View style={styles.content}>
-        <ScrollView
-          style={styles.scrollView}
-          contentContainerStyle={{ paddingTop: 20, paddingBottom: 120 }}
-          showsVerticalScrollIndicator={false}
-          onScroll={handleScroll}
-          scrollEventThrottle={16}
-        >
-          <View style={styles.listContainer}>
-            {renderContent()}
+        {loading ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color={theme.black} />
           </View>
-        </ScrollView>
+        ) : (
+          <ScrollView
+            style={styles.scrollView}
+            contentContainerStyle={{ paddingTop: 20, paddingBottom: 120 }}
+            showsVerticalScrollIndicator={false}
+            onScroll={handleScroll}
+            scrollEventThrottle={16}
+            refreshControl={
+              <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+            }
+          >
+            {/* Onglet En cours */}
+            {activeTab === "active" && (
+              <View style={styles.section}>
+                {activeBookings.length === 0 ? (
+                  <EmptyState
+                    icon="cut-outline"
+                    title="Aucun rendez-vous en cours"
+                    subtitle="Vos rendez-vous imminents apparaîtront ici."
+                    buttonText="Réserver"
+                    onPress={() => router.push(ROUTES.CLIENT.HOME)}
+                  />
+                ) : (
+                  activeBookings.map((booking) => (
+                    <ActiveBookingCard
+                      key={booking.id}
+                      booking={booking}
+                      onContact={() => handleContact(booking)}
+                      onCancel={() => handleCancelBooking(booking.id)}
+                    />
+                  ))
+                )}
+              </View>
+            )}
+
+            {/* Onglet À venir */}
+            {activeTab === "upcoming" && (
+              <View style={styles.section}>
+                {futureBookings.length === 0 ? (
+                  <EmptyState
+                    icon="calendar-outline"
+                    title="Aucune réservation"
+                    subtitle="Vous n'avez pas de réservation à venir. Trouvez votre prochain coiffeur !"
+                    buttonText="Découvrir"
+                    onPress={() => router.push(ROUTES.CLIENT.HOME)}
+                  />
+                ) : (
+                  futureBookings.map((booking) => (
+                    <UpcomingBookingCard
+                      key={booking.id}
+                      booking={booking}
+                      onCancel={() => handleCancelBooking(booking.id)}
+                      onPress={() => handleViewDetails(booking)}
+                    />
+                  ))
+                )}
+              </View>
+            )}
+
+            {/* Onglet Historique */}
+            {activeTab === "past" && (
+              <View style={styles.section}>
+                {pastBookings.length === 0 ? (
+                  <EmptyState
+                    icon="time-outline"
+                    title="Aucun historique"
+                    subtitle="Vos réservations passées apparaîtront ici."
+                  />
+                ) : (
+                  pastBookings.map((booking) => (
+                    <PastBookingCard
+                      key={booking.id}
+                      booking={booking}
+                      onRebook={() => handleRebook(booking)}
+                    />
+                  ))
+                )}
+              </View>
+            )}
+          </ScrollView>
+        )}
       </View>
     </View>
   );
@@ -787,8 +636,6 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: theme.black,
   },
-  
-  // Header noir
   header: {
     backgroundColor: theme.black,
     paddingHorizontal: 20,
@@ -800,11 +647,9 @@ const styles = StyleSheet.create({
     color: theme.white,
     marginBottom: 20,
   },
-  
-  // Tabs
   tabsContainer: {
     flexDirection: "row",
-    gap: 8,
+    gap: 6,
   },
   tab: {
     flexDirection: "row",
@@ -827,26 +672,27 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
   tabBadge: {
-    backgroundColor: "rgba(255,255,255,0.2)",
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 10,
     minWidth: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: theme.white,
     alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 6,
   },
   tabBadgeActive: {
-    backgroundColor: theme.white,
+    backgroundColor: theme.success,
   },
   tabBadgeText: {
     fontSize: 11,
-    fontWeight: "600",
-    color: "rgba(255,255,255,0.7)",
-  },
-  tabBadgeTextActive: {
+    fontWeight: "bold",
     color: theme.black,
   },
-  
-  // Content blanc arrondi
+  tabBadgeTextActive: {
+    fontSize: 11,
+    fontWeight: "bold",
+    color: theme.white,
+  },
   content: {
     flex: 1,
     backgroundColor: theme.white,
@@ -856,33 +702,41 @@ const styles = StyleSheet.create({
   scrollView: {
     flex: 1,
   },
-  listContainer: {
-    paddingHorizontal: 20,
+  section: {
+    paddingHorizontal: 16,
+  },
+  loadingContainer: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingTop: 60,
   },
 
   // Status Badge
   statusBadge: {
-    paddingVertical: 4,
     paddingHorizontal: 10,
-    borderRadius: 12,
+    paddingVertical: 4,
+    borderRadius: 10,
   },
   statusText: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: "600",
   },
 
-  // Active Card
+  // Active Card (En cours)
   activeCard: {
     backgroundColor: theme.card,
     borderRadius: 20,
     padding: 16,
     marginBottom: 16,
+    borderWidth: 2,
+    borderColor: theme.info,
   },
   activeCardHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 16,
+    marginBottom: 14,
   },
   activeCardType: {
     flexDirection: "row",
@@ -896,19 +750,25 @@ const styles = StyleSheet.create({
   },
   activeCardContent: {
     flexDirection: "row",
-    marginBottom: 16,
+    alignItems: "center",
+    marginBottom: 14,
   },
   activeCoiffeurImage: {
     width: 56,
     height: 56,
     borderRadius: 28,
   },
+  avatarPlaceholder: {
+    backgroundColor: theme.border,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   activeCardInfo: {
     flex: 1,
     marginLeft: 12,
   },
   activeCoiffeurName: {
-    fontSize: 17,
+    fontSize: 16,
     fontWeight: "bold",
     color: theme.text,
   },
@@ -921,38 +781,29 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
-    marginTop: 6,
+    marginTop: 4,
   },
   activeMetaText: {
     fontSize: 13,
     color: theme.textMuted,
   },
-  trackingSection: {
-    backgroundColor: theme.infoLight,
-    borderRadius: 14,
-    padding: 14,
-    marginBottom: 16,
+  activeTimeSection: {
+    flexDirection: "row",
+    gap: 20,
+    paddingVertical: 12,
+    borderTopWidth: 1,
+    borderTopColor: theme.border,
+    marginBottom: 14,
   },
-  trackingInfo: {
+  activeTimeItem: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
-    marginBottom: 10,
+    gap: 6,
   },
-  trackingText: {
+  activeTimeText: {
     fontSize: 14,
     fontWeight: "500",
-    color: theme.info,
-  },
-  trackingBar: {
-    height: 6,
-    backgroundColor: "rgba(25,118,210,0.2)",
-    borderRadius: 3,
-  },
-  trackingProgress: {
-    height: 6,
-    backgroundColor: theme.info,
-    borderRadius: 3,
+    color: theme.text,
   },
   activeCardActions: {
     flexDirection: "row",
@@ -980,62 +831,12 @@ const styles = StyleSheet.create({
     color: theme.text,
   },
 
-  // Order Active Card
-  orderProductsRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 12,
-  },
-  orderProductThumb: {
-    width: 44,
-    height: 44,
-    borderRadius: 10,
-    borderWidth: 2,
-    borderColor: theme.card,
-  },
-  orderProductCount: {
-    marginLeft: 12,
-    fontSize: 14,
-    fontWeight: "500",
-    color: theme.text,
-  },
-  deliveryInfo: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    marginBottom: 8,
-  },
-  deliveryText: {
-    fontSize: 13,
-    color: theme.textMuted,
-    flex: 1,
-  },
-  trackOrderBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    backgroundColor: theme.black,
-    paddingVertical: 14,
-    borderRadius: 14,
-    marginTop: 8,
-  },
-  trackOrderBtnText: {
-    fontSize: 15,
-    fontWeight: "600",
-    color: "#FFF",
-  },
-
   // Upcoming Card
   upcomingCard: {
     backgroundColor: theme.card,
     borderRadius: 20,
     overflow: "hidden",
     marginBottom: 16,
-  },
-  upcomingImage: {
-    width: "100%",
-    height: 140,
   },
   upcomingContent: {
     padding: 16,
@@ -1060,7 +861,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 14,
-    marginBottom: 14,
+    marginBottom: 10,
   },
   upcomingMetaItem: {
     flexDirection: "row",
@@ -1080,9 +881,14 @@ const styles = StyleSheet.create({
     marginBottom: 14,
   },
   coiffeurAvatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+  },
+  coiffeurAvatarPlaceholder: {
+    backgroundColor: theme.border,
+    alignItems: "center",
+    justifyContent: "center",
   },
   coiffeurInfo: {
     flex: 1,
@@ -1104,7 +910,7 @@ const styles = StyleSheet.create({
     color: theme.textMuted,
   },
   priceText: {
-    fontSize: 17,
+    fontSize: 18,
     fontWeight: "bold",
     color: theme.text,
   },
@@ -1144,24 +950,17 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   pastCardCancelled: {
-    opacity: 0.7,
+    opacity: 0.6,
   },
   pastImage: {
-    width: 80,
-    height: 80,
+    width: 70,
+    height: 70,
     borderRadius: 12,
   },
-  pastOrderImages: {
-    width: 80,
-    height: 80,
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 4,
-  },
-  pastOrderThumb: {
-    width: 38,
-    height: 38,
-    borderRadius: 8,
+  pastImagePlaceholder: {
+    backgroundColor: theme.border,
+    alignItems: "center",
+    justifyContent: "center",
   },
   pastContent: {
     flex: 1,
@@ -1271,32 +1070,5 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: "600",
     color: "#FFF",
-  },
-
-  // Past Filters
-  pastFiltersContainer: {
-    flexDirection: "row",
-    gap: 8,
-    marginBottom: 20,
-  },
-  pastFilterChip: {
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    borderRadius: 20,
-    backgroundColor: theme.card,
-  },
-  pastFilterChipActive: {
-    backgroundColor: theme.black,
-  },
-  pastFilterText: {
-    fontSize: 13,
-    fontWeight: "500",
-    color: theme.textSecondary,
-  },
-  pastFilterTextActive: {
-    color: "#FFF",
-  },
-  pastListContainer: {
-    gap: 0,
   },
 });

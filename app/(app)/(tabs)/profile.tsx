@@ -1,14 +1,15 @@
 // app/(app)/(tabs)/profile.tsx
-import { 
-  View, 
-  Text, 
-  ScrollView, 
-  Image, 
-  Pressable, 
+import {
+  View,
+  Text,
+  ScrollView,
+  Image,
+  Pressable,
   StyleSheet,
   NativeSyntheticEvent,
   NativeScrollEvent,
   Alert,
+  ActivityIndicator,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -19,9 +20,10 @@ import { useAuthStore } from "@/stores/authStore";
 import { useBookingStore } from "@/stores/bookingStore";
 import { supabase } from "@/lib/supabase";
 import { ROUTES } from "@/constants/routes";
+import { isCurrentUserCoiffeur } from "@/api/coiffeurs";
 
 // ============================================
-// THEME - Style Premium (Header noir)
+// THEME
 // ============================================
 const theme = {
   black: "#000000",
@@ -33,20 +35,20 @@ const theme = {
   border: "#E2E8F0",
   info: "#1976D2",
   infoLight: "#E3F2FD",
+  success: "#2E7D32",
+  successLight: "#E8F5E9",
   error: "#E53935",
   errorLight: "#FFEBEE",
 };
 
 // ============================================
-// HELPER - Formater la date "Membre depuis"
+// HELPER
 // ============================================
 const formatMemberSince = (dateString: string | null): string => {
   if (!dateString) return "Nouveau membre";
-  
   const date = new Date(dateString);
   const month = date.toLocaleDateString("fr-FR", { month: "long" });
   const year = date.getFullYear();
-  
   return `Membre depuis ${month} ${year}`;
 };
 
@@ -63,15 +65,11 @@ export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { setIsScrolling } = useScrollContext();
-  
-  // Auth store
+
   const { user, signOut } = useAuthStore();
-  
-  // Booking store pour les stats
   const { bookings } = useBookingStore();
   const completedBookings = bookings.filter(b => b.status === "completed").length;
-  
-  // State pour les compteurs de favoris (chargés depuis Supabase)
+
   const [favoriteCounts, setFavoriteCounts] = useState<FavoriteCounts>({
     coiffeurs: 0,
     salons: 0,
@@ -79,34 +77,54 @@ export default function ProfileScreen() {
   });
   const [loadingFavorites, setLoadingFavorites] = useState(true);
   
+  // État pour vérifier si l'utilisateur est coiffeur
+  const [isCoiffeur, setIsCoiffeur] = useState<boolean | null>(null);
+  const [checkingCoiffeur, setCheckingCoiffeur] = useState(true);
+
   const lastScrollY = useRef(0);
   const scrollTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Charger les compteurs de favoris depuis Supabase
+  // Vérifier si l'utilisateur est coiffeur
+  useEffect(() => {
+    const checkIfCoiffeur = async () => {
+      setCheckingCoiffeur(true);
+      const result = await isCurrentUserCoiffeur();
+      setIsCoiffeur(result);
+      setCheckingCoiffeur(false);
+    };
+
+    if (user?.id) {
+      checkIfCoiffeur();
+    } else {
+      setIsCoiffeur(false);
+      setCheckingCoiffeur(false);
+    }
+  }, [user?.id]);
+
+  // Charger les compteurs de favoris
   useEffect(() => {
     const fetchFavoriteCounts = async () => {
       if (!user?.id) return;
-      
+
       try {
-        // Compter les favoris par type
         const { count: coiffeursCount } = await supabase
           .from("favorites")
           .select("*", { count: "exact", head: true })
           .eq("user_id", user.id)
           .eq("target_type", "coiffeur");
-        
+
         const { count: salonsCount } = await supabase
           .from("favorites")
           .select("*", { count: "exact", head: true })
           .eq("user_id", user.id)
           .eq("target_type", "salon");
-        
+
         const { count: inspirationsCount } = await supabase
           .from("favorites")
           .select("*", { count: "exact", head: true })
           .eq("user_id", user.id)
           .eq("target_type", "inspiration");
-        
+
         setFavoriteCounts({
           coiffeurs: coiffeursCount || 0,
           salons: salonsCount || 0,
@@ -118,7 +136,7 @@ export default function ProfileScreen() {
         setLoadingFavorites(false);
       }
     };
-    
+
     fetchFavoriteCounts();
   }, [user?.id]);
 
@@ -126,15 +144,15 @@ export default function ProfileScreen() {
     const currentY = event.nativeEvent.contentOffset.y;
     const isGoingDown = currentY > lastScrollY.current;
     const isGoingUp = currentY < lastScrollY.current;
-    
+
     if (scrollTimeout.current) clearTimeout(scrollTimeout.current);
-    
+
     if (isGoingDown && currentY > 30) {
       setIsScrolling(true);
     } else if (isGoingUp) {
       setIsScrolling(false);
     }
-    
+
     scrollTimeout.current = setTimeout(() => setIsScrolling(false), 800);
     lastScrollY.current = currentY;
   };
@@ -145,8 +163,8 @@ export default function ProfileScreen() {
       "Êtes-vous sûr de vouloir vous déconnecter ?",
       [
         { text: "Annuler", style: "cancel" },
-        { 
-          text: "Déconnexion", 
+        {
+          text: "Déconnexion",
           style: "destructive",
           onPress: async () => {
             await signOut();
@@ -165,58 +183,68 @@ export default function ProfileScreen() {
     router.push(route as any);
   };
 
-  const handleSwitchToPro = () => {
-    router.replace(ROUTES.PRO.DASHBOARD);
+  const handleBecomePro = () => {
+    // TODO: Naviguer vers le formulaire d'inscription coiffeur
+    // Pour l'instant, afficher une alerte
+    Alert.alert(
+      "Devenir coiffeur partenaire",
+      "Rejoignez notre réseau de coiffeurs professionnels et développez votre activité !\n\n• Recevez des réservations\n• Gérez votre agenda\n• Développez votre clientèle",
+      [
+        { text: "Annuler", style: "cancel" },
+        {
+          text: "Commencer",
+          onPress: () => {
+            // TODO: router.push(ROUTES.AUTH.BECOME_PRO) quand la page sera créée
+            Alert.alert("Bientôt disponible", "Cette fonctionnalité sera bientôt disponible.");
+          },
+        },
+      ]
+    );
   };
 
-  // Vérifier si l'utilisateur est un professionnel
-  const isProfessional = user?.role === "coiffeur" || user?.role === "salon";
-
-  // Données utilisateur depuis le store (vraies données)
+  // Données utilisateur
   const userName = user?.full_name || `${user?.first_name || ""} ${user?.last_name || ""}`.trim() || "Utilisateur";
   const userEmail = user?.email || "";
   const userImage = user?.avatar_url || "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200";
   const memberSince = formatMemberSince(user?.created_at || null);
-  
-  // Stats depuis les vraies données
+
   const totalFavorites = favoriteCounts.coiffeurs + favoriteCounts.salons + favoriteCounts.inspirations;
   const userRating = user?.rating_as_client || 0;
 
-  // Menu favoris avec compteurs dynamiques
   const FAVORITES_MENU = [
-    { 
-      icon: "cut-outline", 
-      label: "Coiffeurs favoris", 
+    {
+      icon: "cut-outline",
+      label: "Coiffeurs favoris",
       count: favoriteCounts.coiffeurs,
       route: ROUTES.SHARED.FAVORITES.COIFFEURS,
     },
-    { 
-      icon: "storefront-outline", 
-      label: "Salons favoris", 
+    {
+      icon: "storefront-outline",
+      label: "Salons favoris",
       count: favoriteCounts.salons,
       route: ROUTES.SHARED.FAVORITES.SALONS,
     },
-    { 
-      icon: "bookmark-outline", 
-      label: "Inspirations sauvegardées", 
+    {
+      icon: "bookmark-outline",
+      label: "Inspirations sauvegardées",
       count: favoriteCounts.inspirations,
       route: ROUTES.SHARED.FAVORITES.INSPIRATIONS,
     },
   ];
 
   const ACCOUNT_MENU = [
-    { 
-      icon: "person-outline", 
+    {
+      icon: "person-outline",
       label: "Informations personnelles",
       route: ROUTES.SHARED.ACCOUNT.PERSONAL_INFO,
     },
-    { 
-      icon: "card-outline", 
+    {
+      icon: "card-outline",
       label: "Moyens de paiement",
       route: ROUTES.SHARED.ACCOUNT.PAYMENT_METHODS,
     },
-    { 
-      icon: "location-outline", 
+    {
+      icon: "location-outline",
       label: "Adresses enregistrées",
       route: ROUTES.SHARED.ACCOUNT.ADDRESSES,
     },
@@ -224,9 +252,8 @@ export default function ProfileScreen() {
 
   return (
     <View style={styles.container}>
-      {/* HEADER NOIR AVEC PROFIL */}
+      {/* HEADER */}
       <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
-        {/* Top row - juste settings */}
         <View style={styles.headerTopRow}>
           <View style={{ width: 44 }} />
           <Pressable onPress={handleOpenSettings}>
@@ -234,7 +261,6 @@ export default function ProfileScreen() {
           </Pressable>
         </View>
 
-        {/* Photo + Infos */}
         <View style={styles.profileSection}>
           <View style={styles.avatarContainer}>
             <Image source={{ uri: userImage }} style={styles.avatar} />
@@ -242,13 +268,12 @@ export default function ProfileScreen() {
               <Ionicons name="camera" size={14} color={theme.white} />
             </Pressable>
           </View>
-          
+
           <Text style={styles.userName}>{userName}</Text>
           <Text style={styles.userEmail}>{userEmail}</Text>
           <Text style={styles.memberSince}>{memberSince}</Text>
         </View>
 
-        {/* Stats */}
         <View style={styles.statsRow}>
           <View style={styles.statItem}>
             <Text style={styles.statValue}>{totalFavorites}</Text>
@@ -276,7 +301,7 @@ export default function ProfileScreen() {
         </View>
       </View>
 
-      {/* CONTENU BLANC ARRONDI */}
+      {/* CONTENU */}
       <View style={styles.content}>
         <ScrollView
           style={styles.scrollView}
@@ -285,29 +310,37 @@ export default function ProfileScreen() {
           onScroll={handleScroll}
           scrollEventThrottle={16}
         >
-          {/* Switch to Pro - seulement si l'utilisateur est un professionnel */}
-          {isProfessional && (
-            <Pressable style={styles.switchCard} onPress={handleSwitchToPro}>
-              <View style={styles.switchCardLeft}>
-                <View style={styles.switchIconContainer}>
-                  <Ionicons name="briefcase-outline" size={20} color={theme.white} />
+          {/* Devenir Pro - Visible SEULEMENT si pas coiffeur */}
+          {checkingCoiffeur ? (
+            <View style={styles.becomeProCardLoading}>
+              <ActivityIndicator size="small" color={theme.textMuted} />
+            </View>
+          ) : !isCoiffeur ? (
+            <Pressable style={styles.becomeProCard} onPress={handleBecomePro}>
+              <View style={styles.becomeProLeft}>
+                <View style={styles.becomeProIconContainer}>
+                  <Ionicons name="sparkles" size={24} color={theme.white} />
                 </View>
-                <View>
-                  <Text style={styles.switchCardTitle}>Passer en mode Pro</Text>
-                  <Text style={styles.switchCardSubtitle}>Gérer vos RDV et revenus</Text>
+                <View style={styles.becomeProTextContainer}>
+                  <Text style={styles.becomeProTitle}>Devenir coiffeur partenaire</Text>
+                  <Text style={styles.becomeProSubtitle}>
+                    Rejoignez notre réseau et développez votre activité
+                  </Text>
                 </View>
               </View>
-              <Ionicons name="chevron-forward" size={20} color={theme.textMuted} />
+              <View style={styles.becomeProArrow}>
+                <Ionicons name="arrow-forward" size={20} color={theme.success} />
+              </View>
             </Pressable>
-          )}
+          ) : null}
 
-          {/* Mes Favoris Section */}
+          {/* Mes Favoris */}
           <View style={styles.menuSection}>
             <Text style={styles.sectionTitle}>Mes favoris</Text>
             <View style={styles.menuCard}>
               {FAVORITES_MENU.map((item, index) => (
-                <Pressable 
-                  key={index} 
+                <Pressable
+                  key={index}
                   style={[
                     styles.menuItem,
                     index < FAVORITES_MENU.length - 1 && styles.menuItemBorder,
@@ -331,13 +364,13 @@ export default function ProfileScreen() {
             </View>
           </View>
 
-          {/* Mon Compte Section */}
+          {/* Mon Compte */}
           <View style={styles.menuSection}>
             <Text style={styles.sectionTitle}>Mon compte</Text>
             <View style={styles.menuCard}>
               {ACCOUNT_MENU.map((item, index) => (
-                <Pressable 
-                  key={index} 
+                <Pressable
+                  key={index}
                   style={[
                     styles.menuItem,
                     index < ACCOUNT_MENU.length - 1 && styles.menuItemBorder,
@@ -356,7 +389,7 @@ export default function ProfileScreen() {
             </View>
           </View>
 
-          {/* Logout Button */}
+          {/* Logout */}
           <Pressable style={styles.logoutButton} onPress={handleSignOut}>
             <Ionicons name="log-out-outline" size={20} color={theme.error} />
             <Text style={styles.logoutText}>Se déconnecter</Text>
@@ -375,8 +408,6 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: theme.black,
   },
-  
-  // Header noir avec profil
   header: {
     backgroundColor: theme.black,
     paddingHorizontal: 20,
@@ -388,8 +419,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 20,
   },
-  
-  // Profile section dans le header
   profileSection: {
     alignItems: "center",
     marginBottom: 24,
@@ -433,8 +462,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: "rgba(255,255,255,0.4)",
   },
-
-  // Stats dans le header
   statsRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -467,8 +494,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 4,
   },
-  
-  // Content blanc arrondi
   content: {
     flex: 1,
     backgroundColor: theme.white,
@@ -479,39 +504,62 @@ const styles = StyleSheet.create({
     flex: 1,
   },
 
-  // Switch Card (Mode Pro)
-  switchCard: {
+  // Become Pro Card
+  becomeProCard: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    backgroundColor: theme.card,
+    backgroundColor: theme.successLight,
     marginHorizontal: 20,
     borderRadius: 16,
     padding: 16,
     marginBottom: 24,
+    borderWidth: 1,
+    borderColor: "rgba(46, 125, 50, 0.3)",
   },
-  switchCardLeft: {
+  becomeProCardLoading: {
+    marginHorizontal: 20,
+    borderRadius: 16,
+    padding: 24,
+    marginBottom: 24,
+    alignItems: "center",
+    backgroundColor: theme.card,
+  },
+  becomeProLeft: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
+    flex: 1,
+    gap: 14,
   },
-  switchIconContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    backgroundColor: theme.black,
+  becomeProIconContainer: {
+    width: 48,
+    height: 48,
+    borderRadius: 14,
+    backgroundColor: theme.success,
     alignItems: "center",
     justifyContent: "center",
   },
-  switchCardTitle: {
-    fontSize: 15,
-    fontWeight: "600",
-    color: theme.text,
+  becomeProTextContainer: {
+    flex: 1,
   },
-  switchCardSubtitle: {
+  becomeProTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: theme.success,
+    marginBottom: 4,
+  },
+  becomeProSubtitle: {
     fontSize: 13,
-    color: theme.textMuted,
-    marginTop: 2,
+    color: theme.textSecondary,
+    lineHeight: 18,
+  },
+  becomeProArrow: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: theme.white,
+    alignItems: "center",
+    justifyContent: "center",
   },
 
   // Menu Sections

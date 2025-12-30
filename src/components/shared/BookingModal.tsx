@@ -14,11 +14,10 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
-import { useState, useRef, useEffect, useMemo } from "react";
+import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { createBooking, confirmPayment, getCoiffeurAvailableSlots } from "@/api/bookings";
 import type { Service, CoiffeurWithDetails } from "@/types/database";
 import { formatPriceShort } from "@/types/database";
-import { ROUTES } from "@/constants/routes";
 
 const { height } = Dimensions.get("window");
 
@@ -78,21 +77,23 @@ export default function BookingModal({
   const slideAnim = useRef(new Animated.Value(height)).current;
   const backdropAnim = useRef(new Animated.Value(0)).current;
 
-  // Calculer les services sélectionnés et la durée totale
-  const selectedServices = useMemo(
-    () => services.filter(s => selectedServiceIds.includes(s.id)),
-    [services, selectedServiceIds]
-  );
-  
-  const totalDuration = useMemo(
-    () => selectedServices.reduce((sum, s) => sum + s.duration_minutes, 0),
-    [selectedServices]
-  );
+  const selectedServices = useMemo(() => {
+    return services.filter(s => selectedServiceIds.includes(s.id));
+  }, [services, selectedServiceIds]);
 
-  const subtotalCents = useMemo(
-    () => selectedServices.reduce((sum, s) => sum + s.price_cents, 0),
-    [selectedServices]
-  );
+  const totalDuration = useMemo(() => {
+    return selectedServices.reduce((sum, s) => sum + s.duration_minutes, 0);
+  }, [selectedServices]);
+
+  const subtotalCents = useMemo(() => {
+    return selectedServices.reduce((sum, s) => sum + s.price_cents, 0);
+  }, [selectedServices]);
+
+  // Prix minimum des services
+  const minPriceCents = useMemo(() => {
+    if (services.length === 0) return 0;
+    return Math.min(...services.map(s => s.price_cents));
+  }, [services]);
 
   const homeFeeCents = selectedLocation === "domicile" ? (coiffeur?.home_service_fee_cents || 0) : 0;
   const totalCents = subtotalCents + homeFeeCents;
@@ -105,18 +106,20 @@ export default function BookingModal({
     return () => clearInterval(interval);
   }, []);
 
-  const availableDates = Array.from({ length: 14 }, (_, i) => {
-    const date = new Date();
-    date.setDate(date.getDate() + i);
-    return date;
-  });
+  const availableDates = useMemo(() => {
+    return Array.from({ length: 14 }, (_, i) => {
+      const date = new Date();
+      date.setDate(date.getDate() + i);
+      return date;
+    });
+  }, []);
 
-  const isToday = (date: Date) => {
+  const isToday = useCallback((date: Date) => {
     const today = new Date();
     return date.toDateString() === today.toDateString();
-  };
+  }, []);
 
-  const getVisibleTimes = () => {
+  const getVisibleTimes = useCallback(() => {
     if (!selectedDate) return ALL_TIMES;
 
     if (isToday(selectedDate)) {
@@ -133,14 +136,25 @@ export default function BookingModal({
     }
 
     return ALL_TIMES;
-  };
+  }, [selectedDate, currentTime, isToday]);
 
   const visibleTimes = getVisibleTimes();
 
-  // Charger les créneaux réservés quand la date OU la durée change
+  const formatDateISO = useCallback((date: Date) => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }, []);
+
   useEffect(() => {
     async function loadBookedSlots() {
-      if (!selectedDate || !coiffeur || totalDuration === 0) {
+      if (!selectedDate || !coiffeur) {
+        setBookedSlots([]);
+        return;
+      }
+
+      if (totalDuration === 0) {
         setBookedSlots([]);
         return;
       }
@@ -151,17 +165,16 @@ export default function BookingModal({
       const availableSlots = await getCoiffeurAvailableSlots(
         coiffeur.id,
         dateStr,
-        totalDuration // Passer la durée totale des services sélectionnés
+        totalDuration
       );
 
       const booked = ALL_TIMES.filter(time => !availableSlots.includes(time));
       setBookedSlots(booked);
-
       setLoadingSlots(false);
     }
 
     loadBookedSlots();
-  }, [selectedDate, coiffeur, totalDuration]); // ← totalDuration ajouté ici
+  }, [selectedDate, coiffeur, totalDuration, formatDateISO]);
 
   useEffect(() => {
     if (selectedTime) {
@@ -171,7 +184,7 @@ export default function BookingModal({
         setSelectedTime(null);
       }
     }
-  }, [visibleTimes, bookedSlots]);
+  }, [visibleTimes, bookedSlots, selectedTime]);
 
   useEffect(() => {
     if (visible) {
@@ -181,7 +194,7 @@ export default function BookingModal({
         setSelectedServiceIds([]);
       }
 
-      setSelectedLocation(coiffeur?.offers_home_service ? "salon" : "salon");
+      setSelectedLocation("salon");
       setSelectedDate(null);
       setSelectedTime(null);
       setShowSuccess(false);
@@ -205,17 +218,17 @@ export default function BookingModal({
     });
   };
 
-  const toggleService = (serviceId: string) => {
-    setSelectedServiceIds(prev =>
-      prev.includes(serviceId)
+  const toggleService = useCallback((serviceId: string) => {
+    setSelectedServiceIds(prev => {
+      return prev.includes(serviceId)
         ? prev.filter(id => id !== serviceId)
-        : [...prev, serviceId]
-    );
-  };
+        : [...prev, serviceId];
+    });
+  }, []);
 
   const canBook = selectedServiceIds.length > 0 && selectedDate && selectedTime;
 
-  const formatDateShort = (date: Date) => {
+  const formatDateShort = useCallback((date: Date) => {
     const today = new Date();
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
@@ -223,18 +236,11 @@ export default function BookingModal({
     if (date.toDateString() === today.toDateString()) return "Auj.";
     if (date.toDateString() === tomorrow.toDateString()) return "Dem.";
     return date.toLocaleDateString("fr-FR", { weekday: "short" });
-  };
+  }, []);
 
-  const formatDateFull = (date: Date) => {
+  const formatDateFull = useCallback((date: Date) => {
     return date.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" });
-  };
-
-  const formatDateISO = (date: Date) => {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, "0");
-    const day = String(date.getDate()).padStart(2, "0");
-    return `${year}-${month}-${day}`;
-  };
+  }, []);
 
   const handleBook = async () => {
     if (!canBook || !coiffeur || !selectedDate || !selectedTime) return;
@@ -283,12 +289,17 @@ export default function BookingModal({
         setShowSuccess(true);
 
         setTimeout(() => {
-          handleClose();
-          if (onSuccess) {
-            onSuccess();
-          } else {
-            router.replace(ROUTES.CLIENT.ACTIVITY);
-          }
+          // Fermer la modale d'abord (sans animation pour éviter les conflits)
+          onClose();
+          
+          // Naviguer après un court délai
+          setTimeout(() => {
+            if (onSuccess) {
+              onSuccess();
+            } else {
+              router.replace("/(app)/(tabs)/activity" as any);
+            }
+          }, 100);
         }, 2000);
       } else {
         setError(result.error || "Erreur lors de la réservation");
@@ -358,7 +369,12 @@ export default function BookingModal({
                     <Text style={styles.ratingText}>{Number(coiffeur.rating).toFixed(1)}</Text>
                     <Text style={styles.reviewsText}>({coiffeur.reviews_count || 0} avis)</Text>
                   </View>
-                  <Text style={styles.coiffeurCity}>{coiffeur.city || ""}</Text>
+                  <View style={styles.coiffeurMeta}>
+                    <Text style={styles.coiffeurCity}>{coiffeur.city || ""}</Text>
+                    {minPriceCents > 0 && (
+                      <Text style={styles.coiffeurPrice}>dès {formatPriceShort(minPriceCents)}</Text>
+                    )}
+                  </View>
                 </View>
               </View>
 
@@ -661,7 +677,9 @@ const styles = StyleSheet.create({
   ratingRow: { flexDirection: "row", alignItems: "center", marginTop: 4, gap: 4 },
   ratingText: { fontSize: 14, fontWeight: "600", color: theme.text },
   reviewsText: { fontSize: 13, color: theme.textMuted },
-  coiffeurCity: { fontSize: 13, color: theme.textMuted, marginTop: 2 },
+  coiffeurMeta: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 4 },
+  coiffeurCity: { fontSize: 13, color: theme.textMuted },
+  coiffeurPrice: { fontSize: 13, fontWeight: "600", color: theme.success },
 
   section: { paddingHorizontal: 20, marginBottom: 24 },
   sectionHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 12 },

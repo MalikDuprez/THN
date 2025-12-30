@@ -14,16 +14,19 @@ import {
   KeyboardAvoidingView,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { useState, useMemo, useRef, useEffect } from "react";
+import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import { useRouter } from "expo-router";
+import { useFocusEffect } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { InspirationCard, InspirationModal, CoiffeurCard } from "@shared";
 import SuccessModal from "@components/shared/SuccessModal";
+import { NotificationBell } from "@/components/shared/NotificationBell";
 import { useScrollContext } from "./_layout";
 import { FILTERS, SEARCH_FILTERS } from "@constants/mockData";
 import { ROUTES } from "@/constants/routes";
 import { getInspirations, Inspiration } from "@api/inspirations";
-import { getCoiffeurs } from "@/api/coiffeurs";
+import { getCoiffeurs, isCurrentUserCoiffeur } from "@/api/coiffeurs";
+import { getTotalUnreadCountAsClient } from "@/api/messaging";
 import type { CoiffeurWithDetails } from "@/types/database";
 
 const SCREEN_WIDTH = Dimensions.get("window").width;
@@ -58,24 +61,34 @@ const adaptInspiration = (item: Inspiration, index: number) => {
 };
 
 // Adapter coiffeur DB au format attendu par CoiffeurCard
-const adaptCoiffeur = (c: CoiffeurWithDetails) => ({
-  id: c.id,
-  name: c.display_name || "Coiffeur",
-  salon: c.salon?.name || c.city || "Indépendant",
-  image: c.avatar_url || "",
-  avatar: c.avatar_url || "",
-  rating: Number(c.rating) || 0,
-  reviews: c.reviews_count || 0,
-  specialty: c.specialty || "",
-  distance: c.city || "",
-  services: (c.services || []).map(s => ({
-    id: s.id,
-    name: s.name,
-    duration: `${s.duration_minutes} min`,
-    price: s.price_cents / 100,
-  })),
-  photos: c.portfolio_urls || [],
-});
+const adaptCoiffeur = (c: CoiffeurWithDetails) => {
+  // Calculer le prix minimum des services
+  const services = c.services || [];
+  const minPrice = services.length > 0
+    ? Math.min(...services.map(s => s.price_cents)) / 100
+    : 0;
+
+  return {
+    id: c.id,
+    name: c.display_name || "Coiffeur",
+    salon: c.salon?.name || c.city || "Indépendant",
+    image: c.avatar_url || "",
+    avatar: c.avatar_url || "",
+    rating: Number(c.rating) || 0,
+    reviews: c.reviews_count || 0,
+    specialty: c.specialty || "",
+    distance: c.city || "",
+    price: minPrice,
+    atHome: c.offers_home_service || false,
+    services: services.map(s => ({
+      id: s.id,
+      name: s.name,
+      duration: `${s.duration_minutes} min`,
+      price: s.price_cents / 100,
+    })),
+    photos: c.portfolio_urls || [],
+  };
+};
 
 export default function HomeScreen() {
   const router = useRouter();
@@ -87,22 +100,42 @@ export default function HomeScreen() {
   const [inspirationsDB, setInspirationsDB] = useState<Inspiration[]>([]);
   const [coiffeursDB, setCoiffeursDB] = useState<CoiffeurWithDetails[]>([]);
   const [loadingDB, setLoadingDB] = useState(true);
+  const [isCoiffeur, setIsCoiffeur] = useState(false);
+  const [unreadMessages, setUnreadMessages] = useState(0);
 
   useEffect(() => {
     async function loadData() {
       setLoadingDB(true);
-      const [inspirations, coiffeurs] = await Promise.all([
+      const [inspirations, coiffeurs, coiffeurStatus, unreadCount] = await Promise.all([
         getInspirations(),
         getCoiffeurs(),
+        isCurrentUserCoiffeur(),
+        getTotalUnreadCountAsClient(),
       ]);
       console.log("📊 Inspirations from DB:", inspirations.length);
       console.log("📊 Coiffeurs from DB:", coiffeurs.length);
+      console.log("👤 Is coiffeur:", coiffeurStatus);
+      console.log("💬 Unread messages:", unreadCount);
       setInspirationsDB(inspirations);
       setCoiffeursDB(coiffeurs);
+      setIsCoiffeur(coiffeurStatus);
+      setUnreadMessages(unreadCount);
       setLoadingDB(false);
     }
     loadData();
   }, []);
+
+  // Rafraîchir le compteur de messages non lus à chaque focus
+  // Rafraîchir le compteur de messages à chaque focus
+  useFocusEffect(
+    useCallback(() => {
+      const refreshMessages = async () => {
+        const count = await getTotalUnreadCountAsClient();
+        setUnreadMessages(count);
+      };
+      refreshMessages();
+    }, [])
+  );
 
   const [activeFilters, setActiveFilters] = useState<string[]>([]);
   const [activeSearchFilters, setActiveSearchFilters] = useState<string[]>([]);
@@ -229,12 +262,40 @@ export default function HomeScreen() {
       <View style={[styles.header, { paddingTop: insets.top + 16 }]}>
         <View style={styles.headerTop}>
           <Text style={styles.headerTitle}>Découvrir</Text>
-          <Pressable
-            style={styles.notificationButton}
-            onPress={() => router.push(ROUTES.SHARED.NOTIFICATIONS)}
-          >
-            <Ionicons name="notifications-outline" size={22} color={theme.white} />
-          </Pressable>
+          <View style={styles.headerRight}>
+            {/* Bouton Switch Mode Pro - Visible seulement si coiffeur */}
+            {isCoiffeur && (
+              <Pressable 
+                style={styles.switchProButton} 
+                onPress={() => router.replace(ROUTES.PRO.DASHBOARD)}
+              >
+                <Ionicons name="briefcase" size={16} color={theme.black} />
+                <Text style={styles.switchProText}>Pro</Text>
+              </Pressable>
+            )}
+            
+            {/* Bouton Messages */}
+            <Pressable
+              style={styles.headerIconButton}
+              onPress={() => router.push("/(app)/(tabs)/messages" as any)}
+            >
+              <Ionicons name="chatbubble-outline" size={22} color={theme.white} />
+              {unreadMessages > 0 && (
+                <View style={styles.messageBadge}>
+                  <Text style={styles.messageBadgeText}>
+                    {unreadMessages > 9 ? "9+" : unreadMessages}
+                  </Text>
+                </View>
+              )}
+            </Pressable>
+            
+            {/* Bouton Notifications */}
+            <NotificationBell 
+              size={22} 
+              color={theme.white}
+              style={styles.headerIconButton}
+            />
+          </View>
         </View>
 
         <View style={styles.headerTabs}>
@@ -561,7 +622,12 @@ const styles = StyleSheet.create({
   header: { backgroundColor: theme.black, paddingHorizontal: 20, paddingBottom: 20 },
   headerTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 20 },
   headerTitle: { fontSize: 28, fontWeight: "bold", color: theme.white },
-  notificationButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: "rgba(255,255,255,0.15)", alignItems: "center", justifyContent: "center" },
+  headerRight: { flexDirection: "row", alignItems: "center", gap: 8 },
+  headerIconButton: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center", position: "relative" },
+  messageBadge: { position: "absolute", top: 4, right: 4, backgroundColor: "#EF4444", borderRadius: 10, minWidth: 18, height: 18, justifyContent: "center", alignItems: "center", paddingHorizontal: 4 },
+  messageBadgeText: { color: theme.white, fontSize: 10, fontWeight: "bold" },
+  switchProButton: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: theme.white, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 20 },
+  switchProText: { fontSize: 14, fontWeight: "600", color: theme.black },
   headerTabs: { flexDirection: "row", alignItems: "center", gap: 6 },
   headerTab: { flexDirection: "row", alignItems: "center", justifyContent: "center", paddingVertical: 10, paddingHorizontal: 14, borderRadius: 20, gap: 6 },
   headerTabLarge: { flex: 1 },

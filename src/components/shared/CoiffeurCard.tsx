@@ -32,7 +32,13 @@ interface CoiffeurCardProps {
 export default function CoiffeurCard({ item, onPress }: CoiffeurCardProps) {
   return (
     <Pressable onPress={onPress} style={styles.card}>
-      <Image source={{ uri: item.avatar }} style={styles.avatar} />
+      {item.avatar ? (
+        <Image source={{ uri: item.avatar }} style={styles.avatar} />
+      ) : (
+        <View style={[styles.avatar, styles.avatarPlaceholder]}>
+          <Ionicons name="person" size={28} color={theme.textMuted} />
+        </View>
+      )}
       
       <View style={styles.content}>
         <View style={styles.header}>
@@ -49,7 +55,7 @@ export default function CoiffeurCard({ item, onPress }: CoiffeurCardProps) {
         </View>
         
         <Text style={styles.salon}>{item.salon}</Text>
-        <Text style={styles.specialty}>{item.specialty}</Text>
+        {item.specialty ? <Text style={styles.specialty}>{item.specialty}</Text> : null}
         
         <View style={styles.metaRow}>
           <View style={styles.metaItem}>
@@ -59,11 +65,13 @@ export default function CoiffeurCard({ item, onPress }: CoiffeurCardProps) {
           
           <View style={styles.metaItem}>
             <Ionicons name="star" size={14} color="#FFB800" />
-            <Text style={styles.ratingText}>{item.rating}</Text>
+            <Text style={styles.ratingText}>{item.rating.toFixed(1)}</Text>
             <Text style={styles.reviewsText}>({item.reviews})</Text>
           </View>
           
-          <Text style={styles.price}>Dès {item.price}€</Text>
+          {item.price > 0 && (
+            <Text style={styles.price}>Dès {item.price}€</Text>
+          )}
         </View>
       </View>
     </Pressable>
@@ -83,6 +91,11 @@ const styles = StyleSheet.create({
     width: 70,
     height: 70,
     borderRadius: 16,
+  },
+  avatarPlaceholder: {
+    backgroundColor: theme.border,
+    alignItems: "center",
+    justifyContent: "center",
   },
   content: {
     flex: 1,
