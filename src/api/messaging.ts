@@ -1,5 +1,6 @@
 // src/api/messaging.ts
 import { supabase } from "@/lib/supabase";
+import { getUserAvatar } from "@/constants/images";
 
 // ============================================
 // TYPES
@@ -632,10 +633,10 @@ export function getOtherParticipantAvatar(
   conversation: ConversationWithDetails,
   isCoiffeur: boolean
 ): string {
-  const defaultAvatar = "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100";
-  
   if (isCoiffeur) {
-    return conversation.client?.avatar_url || defaultAvatar;
+    const name = getOtherParticipantName(conversation, true);
+    return getUserAvatar(conversation.client?.avatar_url, name);
   }
-  return conversation.coiffeur?.profile?.avatar_url || defaultAvatar;
+  const name = getOtherParticipantName(conversation, false);
+  return getUserAvatar(conversation.coiffeur?.profile?.avatar_url, name);
 }

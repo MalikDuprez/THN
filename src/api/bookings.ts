@@ -7,6 +7,7 @@ import type {
   BookingStatus,
   AddressSnapshot,
 } from "@/types/database";
+import { calculatePlatformFee } from "@/constants/pricing";
 
 // ============ TYPES POUR CRÉATION ============
 
@@ -25,6 +26,7 @@ export interface CreateBookingInput {
     position?: number;
   }[];
   home_fee_cents?: number;
+  payment_method?: "card" | "apple_pay" | "google_pay" | "cash";
 }
 
 export interface CreateBookingResult {
@@ -49,8 +51,14 @@ export async function createBooking(input: CreateBookingInput): Promise<CreateBo
     const subtotal_cents = input.services.reduce((sum, s) => sum + s.price_cents, 0);
     const total_duration_minutes = input.services.reduce((sum, s) => sum + s.duration_minutes, 0);
     const home_fee_cents = input.location === "domicile" ? (input.home_fee_cents || 0) : 0;
-    const platform_fee_cents = 0;
+    const platform_fee_cents = calculatePlatformFee(subtotal_cents + home_fee_cents, input.location);
     const total_cents = subtotal_cents + home_fee_cents + platform_fee_cents;
+    
+    // Calcul des montants selon le mode de paiement
+    const payment_method = input.payment_method || "card";
+    const is_cash_payment = payment_method === "cash";
+    const online_payment_cents = is_cash_payment ? platform_fee_cents : total_cents;
+    const cash_payment_cents = is_cash_payment ? (subtotal_cents + home_fee_cents) : 0;
 
     const startDate = new Date(input.start_at);
 
@@ -87,7 +95,10 @@ export async function createBooking(input: CreateBookingInput): Promise<CreateBo
         platform_fee_cents,
         discount_cents: 0,
         total_cents,
-        status: "confirmed",
+        payment_method,
+        online_payment_cents,
+        cash_payment_cents,
+        status: "pending",
         payment_status: "pending",
         client_notes: input.client_notes || null,
       })
@@ -221,8 +232,8 @@ export async function getUpcomingBookings(): Promise<BookingWithDetails[]> {
 
   if (!user) return [];
 
-  const now = new Date().toISOString();
-
+  // Récupérer uniquement les RDV payés/confirmés : confirmed, in_progress
+  // (pending = en attente de paiement, pas encore confirmé)
   const { data, error } = await supabase
     .from("bookings")
     .select(`
@@ -235,8 +246,7 @@ export async function getUpcomingBookings(): Promise<BookingWithDetails[]> {
       items:booking_items(*)
     `)
     .eq("client_id", user.id)
-    .gte("start_at", now)
-    .in("status", ["pending", "confirmed"])
+    .in("status", ["confirmed", "in_progress"])
     .order("start_at", { ascending: true });
 
   if (error) {
@@ -404,7 +414,7 @@ export async function getCoiffeurAvailableSlots(
     .eq("coiffeur_id", coiffeurId)
     .gte("start_at", startOfDay)
     .lte("start_at", endOfDay)
-    .in("status", ["pending", "confirmed"]);
+    .in("status", ["confirmed", "in_progress"]); // Ignorer les pending (pas encore payés)
 
   if (error) {
     console.error("Error fetching coiffeur bookings:", error);
@@ -493,7 +503,7 @@ export async function getCoiffeurTodayBookings(): Promise<BookingWithDetails[]> 
     .eq("coiffeur_id", coiffeurId)
     .gte("start_at", startOfDay.toISOString())
     .lte("start_at", endOfDay.toISOString())
-    .in("status", ["pending", "confirmed"])
+    .in("status", ["confirmed", "in_progress"])
     .order("start_at", { ascending: true });
 
   if (error) {
@@ -520,7 +530,7 @@ export async function getCoiffeurUpcomingBookings(): Promise<BookingWithDetails[
     `)
     .eq("coiffeur_id", coiffeurId)
     .gte("start_at", now)
-    .in("status", ["pending", "confirmed"])
+    .in("status", ["confirmed", "in_progress"])
     .order("start_at", { ascending: true })
     .limit(20);
 

@@ -245,3 +245,34 @@ export async function updateCoiffeurProfile(updates: Partial<Coiffeur>): Promise
 
   return true;
 }
+
+// Récupérer les services du coiffeur connecté
+export async function getCoiffeurServices(): Promise<Service[]> {
+  const { data: { user } } = await supabase.auth.getUser();
+  
+  if (!user) return [];
+
+  // D'abord récupérer l'ID du coiffeur
+  const { data: coiffeur } = await supabase
+    .from("coiffeurs")
+    .select("id")
+    .eq("profile_id", user.id)
+    .single();
+
+  if (!coiffeur) return [];
+
+  // Puis récupérer ses services
+  const { data: services, error } = await supabase
+    .from("services")
+    .select("*")
+    .eq("coiffeur_id", coiffeur.id)
+    .eq("is_active", true)
+    .order("name");
+
+  if (error) {
+    console.error("Error fetching coiffeur services:", error);
+    return [];
+  }
+
+  return services || [];
+}

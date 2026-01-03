@@ -11,3 +11,9 @@ export type { BookingItem, BookingStatus, BookingLocation } from "./bookingStore
 // Orders (Commandes produits)
 export { useOrderStore } from "./orderStore";
 export type { OrderItem, OrderStatus, OrderProduct, DeliveryMethod } from "./orderStore";
+
+// Notifications
+export { useNotificationStore } from "./notificationStore";
+
+// Messages
+export { useMessageStore } from "./messageStore";

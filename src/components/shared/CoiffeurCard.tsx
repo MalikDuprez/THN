@@ -68,10 +68,6 @@ export default function CoiffeurCard({ item, onPress }: CoiffeurCardProps) {
             <Text style={styles.ratingText}>{item.rating.toFixed(1)}</Text>
             <Text style={styles.reviewsText}>({item.reviews})</Text>
           </View>
-          
-          {item.price > 0 && (
-            <Text style={styles.price}>Dès {item.price}€</Text>
-          )}
         </View>
       </View>
     </Pressable>

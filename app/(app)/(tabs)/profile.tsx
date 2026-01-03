@@ -13,14 +13,15 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useRef, useEffect, useState } from "react";
+import { useRef, useEffect, useState, useCallback } from "react";
 import { useRouter } from "expo-router";
+import { useFocusEffect } from "expo-router";
 import { useScrollContext } from "./_layout";
 import { useAuthStore } from "@/stores/authStore";
-import { useBookingStore } from "@/stores/bookingStore";
 import { supabase } from "@/lib/supabase";
 import { ROUTES } from "@/constants/routes";
 import { isCurrentUserCoiffeur } from "@/api/coiffeurs";
+import { getUserAvatar } from "@/constants/images";
 
 // ============================================
 // THEME
@@ -67,8 +68,6 @@ export default function ProfileScreen() {
   const { setIsScrolling } = useScrollContext();
 
   const { user, signOut } = useAuthStore();
-  const { bookings } = useBookingStore();
-  const completedBookings = bookings.filter(b => b.status === "completed").length;
 
   const [favoriteCounts, setFavoriteCounts] = useState<FavoriteCounts>({
     coiffeurs: 0,
@@ -101,44 +100,53 @@ export default function ProfileScreen() {
     }
   }, [user?.id]);
 
-  // Charger les compteurs de favoris
-  useEffect(() => {
-    const fetchFavoriteCounts = async () => {
-      if (!user?.id) return;
+  // Fonction pour charger les compteurs de favoris
+  const fetchFavoriteCounts = useCallback(async () => {
+    if (!user?.id) return;
 
-      try {
-        const { count: coiffeursCount } = await supabase
-          .from("favorites")
-          .select("*", { count: "exact", head: true })
-          .eq("user_id", user.id)
-          .eq("target_type", "coiffeur");
+    try {
+      // ✅ Utilise favorite_type (pas target_type)
+      const { count: coiffeursCount } = await supabase
+        .from("favorites")
+        .select("*", { count: "exact", head: true })
+        .eq("user_id", user.id)
+        .eq("favorite_type", "coiffeur");
 
-        const { count: salonsCount } = await supabase
-          .from("favorites")
-          .select("*", { count: "exact", head: true })
-          .eq("user_id", user.id)
-          .eq("target_type", "salon");
+      const { count: salonsCount } = await supabase
+        .from("favorites")
+        .select("*", { count: "exact", head: true })
+        .eq("user_id", user.id)
+        .eq("favorite_type", "salon");
 
-        const { count: inspirationsCount } = await supabase
-          .from("favorites")
-          .select("*", { count: "exact", head: true })
-          .eq("user_id", user.id)
-          .eq("target_type", "inspiration");
+      const { count: inspirationsCount } = await supabase
+        .from("favorites")
+        .select("*", { count: "exact", head: true })
+        .eq("user_id", user.id)
+        .eq("favorite_type", "inspiration");
 
-        setFavoriteCounts({
-          coiffeurs: coiffeursCount || 0,
-          salons: salonsCount || 0,
-          inspirations: inspirationsCount || 0,
-        });
-      } catch (error) {
-        console.error("Erreur chargement favoris:", error);
-      } finally {
-        setLoadingFavorites(false);
-      }
-    };
-
-    fetchFavoriteCounts();
+      setFavoriteCounts({
+        coiffeurs: coiffeursCount || 0,
+        salons: salonsCount || 0,
+        inspirations: inspirationsCount || 0,
+      });
+    } catch (error) {
+      console.error("Erreur chargement favoris:", error);
+    } finally {
+      setLoadingFavorites(false);
+    }
   }, [user?.id]);
+
+  // Charger au montage
+  useEffect(() => {
+    fetchFavoriteCounts();
+  }, [fetchFavoriteCounts]);
+
+  // ✅ Recharger quand on revient sur la page (après ajout/suppression favori)
+  useFocusEffect(
+    useCallback(() => {
+      fetchFavoriteCounts();
+    }, [fetchFavoriteCounts])
+  );
 
   const handleScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
     const currentY = event.nativeEvent.contentOffset.y;
@@ -183,29 +191,23 @@ export default function ProfileScreen() {
     router.push(route as any);
   };
 
+  const handleSwitchToPro = () => {
+    router.replace(ROUTES.PRO.DASHBOARD);
+  };
+
   const handleBecomePro = () => {
     // TODO: Naviguer vers le formulaire d'inscription coiffeur
-    // Pour l'instant, afficher une alerte
     Alert.alert(
-      "Devenir coiffeur partenaire",
-      "Rejoignez notre réseau de coiffeurs professionnels et développez votre activité !\n\n• Recevez des réservations\n• Gérez votre agenda\n• Développez votre clientèle",
-      [
-        { text: "Annuler", style: "cancel" },
-        {
-          text: "Commencer",
-          onPress: () => {
-            // TODO: router.push(ROUTES.AUTH.BECOME_PRO) quand la page sera créée
-            Alert.alert("Bientôt disponible", "Cette fonctionnalité sera bientôt disponible.");
-          },
-        },
-      ]
+      "Devenir coiffeur",
+      "Cette fonctionnalité sera bientôt disponible. Vous pourrez créer votre profil professionnel et commencer à recevoir des réservations.",
+      [{ text: "OK" }]
     );
   };
 
   // Données utilisateur
   const userName = user?.full_name || `${user?.first_name || ""} ${user?.last_name || ""}`.trim() || "Utilisateur";
   const userEmail = user?.email || "";
-  const userImage = user?.avatar_url || "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200";
+  const userImage = getUserAvatar(user?.avatar_url, user?.full_name || user?.first_name);
   const memberSince = formatMemberSince(user?.created_at || null);
 
   const totalFavorites = favoriteCounts.coiffeurs + favoriteCounts.salons + favoriteCounts.inspirations;
@@ -281,11 +283,6 @@ export default function ProfileScreen() {
           </View>
           <View style={styles.statDivider} />
           <View style={styles.statItem}>
-            <Text style={styles.statValue}>{completedBookings}</Text>
-            <Text style={styles.statLabel}>RDV</Text>
-          </View>
-          <View style={styles.statDivider} />
-          <View style={styles.statItem}>
             <View style={styles.ratingContainer}>
               {userRating > 0 ? (
                 <>
@@ -310,29 +307,40 @@ export default function ProfileScreen() {
           onScroll={handleScroll}
           scrollEventThrottle={16}
         >
-          {/* Devenir Pro - Visible SEULEMENT si pas coiffeur */}
+          {/* Switch / Devenir Pro */}
           {checkingCoiffeur ? (
-            <View style={styles.becomeProCardLoading}>
+            <View style={styles.switchCardLoading}>
               <ActivityIndicator size="small" color={theme.textMuted} />
             </View>
-          ) : !isCoiffeur ? (
-            <Pressable style={styles.becomeProCard} onPress={handleBecomePro}>
-              <View style={styles.becomeProLeft}>
-                <View style={styles.becomeProIconContainer}>
-                  <Ionicons name="sparkles" size={24} color={theme.white} />
+          ) : isCoiffeur ? (
+            // Utilisateur EST coiffeur → Afficher "Passer en mode Pro"
+            <Pressable style={styles.switchCard} onPress={handleSwitchToPro}>
+              <View style={styles.switchCardLeft}>
+                <View style={styles.switchIconContainer}>
+                  <Ionicons name="briefcase-outline" size={20} color={theme.white} />
                 </View>
-                <View style={styles.becomeProTextContainer}>
-                  <Text style={styles.becomeProTitle}>Devenir coiffeur partenaire</Text>
-                  <Text style={styles.becomeProSubtitle}>
-                    Rejoignez notre réseau et développez votre activité
-                  </Text>
+                <View>
+                  <Text style={styles.switchCardTitle}>Passer en mode Pro</Text>
+                  <Text style={styles.switchCardSubtitle}>Gérer vos RDV et revenus</Text>
                 </View>
               </View>
-              <View style={styles.becomeProArrow}>
-                <Ionicons name="arrow-forward" size={20} color={theme.success} />
-              </View>
+              <Ionicons name="chevron-forward" size={20} color={theme.textMuted} />
             </Pressable>
-          ) : null}
+          ) : (
+            // Utilisateur N'EST PAS coiffeur → Afficher "Devenir coiffeur"
+            <Pressable style={styles.becomeProCard} onPress={handleBecomePro}>
+              <View style={styles.switchCardLeft}>
+                <View style={styles.becomeProIconContainer}>
+                  <Ionicons name="sparkles" size={20} color={theme.white} />
+                </View>
+                <View>
+                  <Text style={styles.switchCardTitle}>Devenir coiffeur</Text>
+                  <Text style={styles.switchCardSubtitle}>Créez votre profil professionnel</Text>
+                </View>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color={theme.textMuted} />
+            </Pressable>
+          )}
 
           {/* Mes Favoris */}
           <View style={styles.menuSection}>
@@ -504,6 +512,48 @@ const styles = StyleSheet.create({
     flex: 1,
   },
 
+  // Switch Card (Mode Pro)
+  switchCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: theme.card,
+    marginHorizontal: 20,
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 24,
+  },
+  switchCardLoading: {
+    marginHorizontal: 20,
+    borderRadius: 16,
+    padding: 24,
+    marginBottom: 24,
+    alignItems: "center",
+  },
+  switchCardLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  switchIconContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: theme.black,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  switchCardTitle: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: theme.text,
+  },
+  switchCardSubtitle: {
+    fontSize: 13,
+    color: theme.textMuted,
+    marginTop: 2,
+  },
+
   // Become Pro Card
   becomeProCard: {
     flexDirection: "row",
@@ -515,49 +565,13 @@ const styles = StyleSheet.create({
     padding: 16,
     marginBottom: 24,
     borderWidth: 1,
-    borderColor: "rgba(46, 125, 50, 0.3)",
-  },
-  becomeProCardLoading: {
-    marginHorizontal: 20,
-    borderRadius: 16,
-    padding: 24,
-    marginBottom: 24,
-    alignItems: "center",
-    backgroundColor: theme.card,
-  },
-  becomeProLeft: {
-    flexDirection: "row",
-    alignItems: "center",
-    flex: 1,
-    gap: 14,
+    borderColor: theme.success,
   },
   becomeProIconContainer: {
-    width: 48,
-    height: 48,
-    borderRadius: 14,
+    width: 40,
+    height: 40,
+    borderRadius: 12,
     backgroundColor: theme.success,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  becomeProTextContainer: {
-    flex: 1,
-  },
-  becomeProTitle: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: theme.success,
-    marginBottom: 4,
-  },
-  becomeProSubtitle: {
-    fontSize: 13,
-    color: theme.textSecondary,
-    lineHeight: 18,
-  },
-  becomeProArrow: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: theme.white,
     alignItems: "center",
     justifyContent: "center",
   },

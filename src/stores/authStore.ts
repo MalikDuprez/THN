@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { supabase } from "@/lib/supabase";
+import { disablePushToken } from "@/api/pushNotifications";
 
 type UserRole = "client" | "coiffeur" | "salon" | null;
 type Gender = "male" | "female" | "other" | null;
@@ -136,6 +137,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   signOut: async () => {
     const { demoMode } = get();
     if (!demoMode) {
+      // Désactiver le push token avant déconnexion
+      await disablePushToken();
       await supabase.auth.signOut();
     }
     set({ user: null, isAuthenticated: false, demoMode: false, demoRole: "client" });

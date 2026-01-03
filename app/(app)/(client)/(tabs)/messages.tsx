@@ -22,6 +22,7 @@ import {
   type ConversationWithDetails,
 } from "@/api/messaging";
 import { supabase } from "@/lib/supabase";
+import { useMessageStore } from "@/stores/messageStore";
 
 // ============================================
 // THEME
@@ -116,6 +117,7 @@ const EmptyState = () => (
 export default function MessagesScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { fetchUnreadCounts } = useMessageStore();
   
   const [conversations, setConversations] = useState<ConversationWithDetails[]>([]);
   const [loading, setLoading] = useState(true);
@@ -134,13 +136,15 @@ export default function MessagesScreen() {
     try {
       const data = await getMyConversations();
       setConversations(data);
+      // Rafraîchir les compteurs du store
+      fetchUnreadCounts();
     } catch (error) {
       console.error("Error loading conversations:", error);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [fetchUnreadCounts]);
 
   useEffect(() => {
     loadConversations();
@@ -159,10 +163,12 @@ export default function MessagesScreen() {
         }
         return prev;
       });
+      // Rafraîchir les compteurs du store
+      fetchUnreadCounts();
     });
 
     return unsubscribe;
-  }, []);
+  }, [fetchUnreadCounts]);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);

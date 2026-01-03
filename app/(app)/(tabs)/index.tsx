@@ -26,7 +26,7 @@ import { FILTERS, SEARCH_FILTERS } from "@constants/mockData";
 import { ROUTES } from "@/constants/routes";
 import { getInspirations, Inspiration } from "@api/inspirations";
 import { getCoiffeurs, isCurrentUserCoiffeur } from "@/api/coiffeurs";
-import { getTotalUnreadCountAsClient } from "@/api/messaging";
+import { useMessageStore } from "@/stores/messageStore";
 import type { CoiffeurWithDetails } from "@/types/database";
 
 const SCREEN_WIDTH = Dimensions.get("window").width;
@@ -101,40 +101,34 @@ export default function HomeScreen() {
   const [coiffeursDB, setCoiffeursDB] = useState<CoiffeurWithDetails[]>([]);
   const [loadingDB, setLoadingDB] = useState(true);
   const [isCoiffeur, setIsCoiffeur] = useState(false);
-  const [unreadMessages, setUnreadMessages] = useState(0);
+  const { clientUnreadCount, fetchUnreadCounts } = useMessageStore();
 
   useEffect(() => {
     async function loadData() {
       setLoadingDB(true);
-      const [inspirations, coiffeurs, coiffeurStatus, unreadCount] = await Promise.all([
+      const [inspirations, coiffeurs, coiffeurStatus] = await Promise.all([
         getInspirations(),
         getCoiffeurs(),
         isCurrentUserCoiffeur(),
-        getTotalUnreadCountAsClient(),
       ]);
       console.log("📊 Inspirations from DB:", inspirations.length);
       console.log("📊 Coiffeurs from DB:", coiffeurs.length);
       console.log("👤 Is coiffeur:", coiffeurStatus);
-      console.log("💬 Unread messages:", unreadCount);
       setInspirationsDB(inspirations);
       setCoiffeursDB(coiffeurs);
       setIsCoiffeur(coiffeurStatus);
-      setUnreadMessages(unreadCount);
+      // Rafraîchir les compteurs de messages via le store
+      fetchUnreadCounts();
       setLoadingDB(false);
     }
     loadData();
   }, []);
 
   // Rafraîchir le compteur de messages non lus à chaque focus
-  // Rafraîchir le compteur de messages à chaque focus
   useFocusEffect(
     useCallback(() => {
-      const refreshMessages = async () => {
-        const count = await getTotalUnreadCountAsClient();
-        setUnreadMessages(count);
-      };
-      refreshMessages();
-    }, [])
+      fetchUnreadCounts();
+    }, [fetchUnreadCounts])
   );
 
   const [activeFilters, setActiveFilters] = useState<string[]>([]);
@@ -280,10 +274,10 @@ export default function HomeScreen() {
               onPress={() => router.push("/(app)/(tabs)/messages" as any)}
             >
               <Ionicons name="chatbubble-outline" size={22} color={theme.white} />
-              {unreadMessages > 0 && (
+              {clientUnreadCount > 0 && (
                 <View style={styles.messageBadge}>
                   <Text style={styles.messageBadgeText}>
-                    {unreadMessages > 9 ? "9+" : unreadMessages}
+                    {clientUnreadCount > 9 ? "9+" : clientUnreadCount}
                   </Text>
                 </View>
               )}

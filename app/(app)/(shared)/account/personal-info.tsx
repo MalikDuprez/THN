@@ -5,6 +5,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { useState } from "react";
 import { useAuthStore } from "@stores/authStore";
+import { getUserAvatar } from "@/constants/images";
 
 const theme = {
   background: "#FFFFFF",
@@ -36,7 +37,7 @@ export default function PersonalInfoScreen() {
         </View>
 
         <View style={styles.avatarSection}>
-          <Image source={{ uri: user?.avatar_url || "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200" }} style={styles.avatar} />
+          <Image source={{ uri: getUserAvatar(user?.avatar_url, user?.full_name) }} style={styles.avatar} />
           <Pressable style={styles.changeAvatarButton}>
             <Text style={styles.changeAvatarText}>Changer la photo</Text>
           </Pressable>

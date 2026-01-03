@@ -7,6 +7,40 @@ import type {
   NotificationData,
 } from "@/types/database";
 
+// ============ HELPERS ============
+
+/**
+ * Vérifie si l'utilisateur connecté est aussi un coiffeur
+ */
+export async function checkIsCoiffeur(): Promise<boolean> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return false;
+
+  const { data } = await supabase
+    .from("coiffeurs")
+    .select("id")
+    .eq("profile_id", user.id)
+    .single();
+
+  return !!data;
+}
+
+/**
+ * Récupère l'ID coiffeur de l'utilisateur connecté
+ */
+export async function getMyCoiffeurId(): Promise<string | null> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return null;
+
+  const { data } = await supabase
+    .from("coiffeurs")
+    .select("id")
+    .eq("profile_id", user.id)
+    .single();
+
+  return data?.id || null;
+}
+
 // ============ READ ============
 
 /**
@@ -35,6 +69,74 @@ export async function getNotifications(limit = 50): Promise<NotificationWithActo
 
   if (error) {
     console.error("Error fetching notifications:", error);
+    return [];
+  }
+
+  return data || [];
+}
+
+/**
+ * Récupère les notifications pour le rôle CLIENT
+ * Filtre sur target_role = 'client' OU target_role IS NULL (pour les anciennes notifs)
+ */
+export async function getClientNotifications(limit = 50): Promise<NotificationWithActor[]> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return [];
+
+  const { data, error } = await supabase
+    .from("notifications")
+    .select(`
+      *,
+      actor:profiles!notifications_actor_id_fkey(
+        id,
+        full_name,
+        first_name,
+        last_name,
+        avatar_url
+      )
+    `)
+    .eq("recipient_id", user.id)
+    .or("target_role.eq.client,target_role.is.null")
+    .order("created_at", { ascending: false })
+    .limit(limit);
+
+  if (error) {
+    console.error("Error fetching client notifications:", error);
+    return [];
+  }
+
+  // Filtrer les notifs qui sont explicitement pour coiffeur (target_role = 'coiffeur')
+  // On garde celles qui sont 'client' ou NULL
+  return (data || []).filter(n => n.target_role !== 'coiffeur');
+}
+
+/**
+ * Récupère les notifications pour le rôle COIFFEUR
+ * Filtre sur target_role = 'coiffeur'
+ */
+export async function getCoiffeurNotifications(limit = 50): Promise<NotificationWithActor[]> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return [];
+
+  const { data, error } = await supabase
+    .from("notifications")
+    .select(`
+      *,
+      actor:profiles!notifications_actor_id_fkey(
+        id,
+        full_name,
+        first_name,
+        last_name,
+        avatar_url
+      )
+    `)
+    .eq("recipient_id", user.id)
+    .eq("target_role", "coiffeur")
+    .order("created_at", { ascending: false })
+    .limit(limit);
+
+  if (error) {
+    console.error("Error fetching coiffeur notifications:", error);
     return [];
   }
 
@@ -73,7 +175,7 @@ export async function getUnreadNotifications(): Promise<NotificationWithActor[]>
 }
 
 /**
- * Compte les notifications non lues (pour badge)
+ * Compte les notifications non lues (pour badge) - TOUTES
  */
 export async function getUnreadCount(): Promise<number> {
   const { data: { user } } = await supabase.auth.getUser();
@@ -87,6 +189,51 @@ export async function getUnreadCount(): Promise<number> {
 
   if (error) {
     console.error("Error counting unread notifications:", error);
+    return 0;
+  }
+
+  return count || 0;
+}
+
+/**
+ * Compte les notifications non lues CLIENT
+ */
+export async function getUnreadCountAsClient(): Promise<number> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return 0;
+
+  // On récupère les notifs non lues et on filtre côté client
+  const { data, error } = await supabase
+    .from("notifications")
+    .select("id, target_role")
+    .eq("recipient_id", user.id)
+    .eq("is_read", false);
+
+  if (error) {
+    console.error("Error counting client unread notifications:", error);
+    return 0;
+  }
+
+  // Compter celles qui sont pour client (target_role = 'client' ou NULL mais pas 'coiffeur')
+  return (data || []).filter(n => n.target_role !== 'coiffeur').length;
+}
+
+/**
+ * Compte les notifications non lues COIFFEUR
+ */
+export async function getUnreadCountAsCoiffeur(): Promise<number> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return 0;
+
+  const { count, error } = await supabase
+    .from("notifications")
+    .select("id", { count: "exact", head: true })
+    .eq("recipient_id", user.id)
+    .eq("is_read", false)
+    .eq("target_role", "coiffeur");
+
+  if (error) {
+    console.error("Error counting coiffeur unread notifications:", error);
     return 0;
   }
 
@@ -139,6 +286,63 @@ export async function markAllAsRead(): Promise<boolean> {
   return true;
 }
 
+/**
+ * Marque toutes les notifications CLIENT comme lues
+ */
+export async function markAllClientAsRead(): Promise<boolean> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return false;
+
+  // Marquer celles qui sont explicitement client
+  await supabase
+    .from("notifications")
+    .update({
+      is_read: true,
+      read_at: new Date().toISOString(),
+    })
+    .eq("recipient_id", user.id)
+    .eq("is_read", false)
+    .eq("target_role", "client");
+
+  // Marquer aussi celles qui sont NULL (anciennes notifs, ambiguës)
+  await supabase
+    .from("notifications")
+    .update({
+      is_read: true,
+      read_at: new Date().toISOString(),
+    })
+    .eq("recipient_id", user.id)
+    .eq("is_read", false)
+    .is("target_role", null);
+
+  return true;
+}
+
+/**
+ * Marque toutes les notifications COIFFEUR comme lues
+ */
+export async function markAllCoiffeurAsRead(): Promise<boolean> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return false;
+
+  const { error } = await supabase
+    .from("notifications")
+    .update({
+      is_read: true,
+      read_at: new Date().toISOString(),
+    })
+    .eq("recipient_id", user.id)
+    .eq("is_read", false)
+    .eq("target_role", "coiffeur");
+
+  if (error) {
+    console.error("Error marking coiffeur notifications as read:", error);
+    return false;
+  }
+
+  return true;
+}
+
 // ============ DELETE ============
 
 /**
@@ -179,7 +383,7 @@ export async function clearReadNotifications(): Promise<boolean> {
   return true;
 }
 
-// ============ CREATE (pour usage interne/triggers) ============
+// ============ CREATE ============
 
 export interface CreateNotificationInput {
   recipient_id: string;
@@ -189,11 +393,12 @@ export interface CreateNotificationInput {
   data?: NotificationData;
   actor_id?: string;
   image_url?: string;
+  target_role?: "client" | "coiffeur"; // IMPORTANT: spécifier le rôle cible
 }
 
 /**
- * Crée une notification (utilisé par le backend/triggers)
- * Note: En production, cette fonction serait appelée côté serveur
+ * Crée une notification
+ * IMPORTANT: toujours spécifier target_role pour les utilisateurs dual
  */
 export async function createNotification(
   input: CreateNotificationInput
@@ -208,6 +413,7 @@ export async function createNotification(
       data: input.data || {},
       actor_id: input.actor_id || null,
       image_url: input.image_url || null,
+      target_role: input.target_role || null, // Nouveau champ !
       is_read: false,
       push_sent: false,
     })
@@ -222,7 +428,7 @@ export async function createNotification(
   return data;
 }
 
-// ============ HELPERS ============
+// ============ HELPERS D'AFFICHAGE ============
 
 /**
  * Retourne l'icône appropriée selon le type de notification
@@ -248,16 +454,16 @@ export function getNotificationIcon(type: NotificationType): string {
  */
 export function getNotificationColor(type: NotificationType): string {
   const colors: Record<NotificationType, string> = {
-    new_booking: "#4CAF50",      // Vert
-    booking_confirmed: "#4CAF50", // Vert
-    booking_cancelled: "#F44336", // Rouge
-    booking_reminder: "#FF9800",  // Orange
-    booking_completed: "#2196F3", // Bleu
-    new_message: "#9C27B0",       // Violet
-    new_review: "#FFC107",        // Jaune
-    review_response: "#00BCD4",   // Cyan
-    welcome: "#E91E63",           // Rose
-    promo: "#FF5722",             // Orange foncé
+    new_booking: "#4CAF50",
+    booking_confirmed: "#4CAF50",
+    booking_cancelled: "#F44336",
+    booking_reminder: "#FF9800",
+    booking_completed: "#2196F3",
+    new_message: "#9C27B0",
+    new_review: "#FFC107",
+    review_response: "#00BCD4",
+    welcome: "#E91E63",
+    promo: "#FF5722",
   };
   return colors[type] || "#757575";
 }
@@ -287,24 +493,19 @@ export function formatNotificationDate(dateString: string): string {
 
 // ============ REALTIME SUBSCRIPTION ============
 
-// Singleton pour éviter les subscriptions multiples
 let notificationChannel: ReturnType<typeof supabase.channel> | null = null;
 let notificationCallback: ((notification: Notification) => void) | null = null;
 
 /**
  * S'abonne aux nouvelles notifications en temps réel
- * @param onNewNotification Callback appelé quand une nouvelle notification arrive
- * @returns Fonction pour se désabonner
  */
 export function subscribeToNotifications(
   onNewNotification: (notification: Notification) => void
 ): () => void {
-  // Stocker le callback pour pouvoir le mettre à jour
   notificationCallback = onNewNotification;
   
-  // Si déjà abonné, ne rien faire
   if (notificationChannel) {
-    console.log("🔔 Notification channel already exists, reusing");
+    console.log("🔔 Notification channel already exists, updating callback");
     return () => {};
   }
 
@@ -317,7 +518,6 @@ export function subscribeToNotifications(
     
     console.log("🔔 Setting up notification subscription for user:", user.id);
 
-    // Écouter TOUS les INSERT sur notifications (sans filtre - plus fiable avec RLS)
     notificationChannel = supabase
       .channel("notifications:realtime")
       .on(
@@ -329,12 +529,10 @@ export function subscribeToNotifications(
         },
         async (payload) => {
           const notification = payload.new as Notification;
-          console.log("🔔 Realtime notification received:", notification.title, "for:", notification.recipient_id);
+          console.log("🔔 Realtime notification received:", notification.title, "target_role:", notification.target_role);
           
-          // Vérifier l'utilisateur actuel (peut avoir changé)
           const { data: { user: currentUser } } = await supabase.auth.getUser();
           
-          // Vérifier si c'est pour nous
           if (currentUser && notification.recipient_id === currentUser.id && notificationCallback) {
             console.log("🔔 Notification is for us! Calling callback");
             notificationCallback(notification);
@@ -342,12 +540,29 @@ export function subscribeToNotifications(
         }
       )
       .subscribe((status) => {
-        console.log("🔔 Subscription status:", status);
+        console.log("🔔 Notification subscription status:", status);
       });
   };
 
   setupSubscription();
 
-  // Retourne une fonction vide - on ne se désinscrit jamais
-  return () => {};
+  return () => {
+    if (notificationChannel) {
+      console.log("🔔 Unsubscribing from notifications");
+      supabase.removeChannel(notificationChannel);
+      notificationChannel = null;
+      notificationCallback = null;
+    }
+  };
+}
+
+/**
+ * Réinitialise la subscription
+ */
+export function resetNotificationSubscription(): void {
+  if (notificationChannel) {
+    supabase.removeChannel(notificationChannel);
+    notificationChannel = null;
+    notificationCallback = null;
+  }
 }

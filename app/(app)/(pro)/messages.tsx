@@ -1,4 +1,4 @@
-// app/(app)/(pro)/messages.tsx
+// app/(app)/(client)/(tabs)/messages.tsx
 import { 
   View, 
   Text, 
@@ -15,7 +15,6 @@ import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "expo-router";
 import { 
   getMyConversations,
-  getTotalUnreadCount,
   subscribeToConversations,
   formatMessageTime,
   getOtherParticipantName,
@@ -23,6 +22,7 @@ import {
   type ConversationWithDetails,
 } from "@/api/messaging";
 import { supabase } from "@/lib/supabase";
+import { useMessageStore } from "@/stores/messageStore";
 
 // ============================================
 // THEME
@@ -37,7 +37,6 @@ const theme = {
   accent: "#3B82F6",
   accentLight: "#EFF6FF",
   border: "#E2E8F0",
-  success: "#10B981",
 };
 
 // ============================================
@@ -53,9 +52,9 @@ const ConversationItem = ({
   onPress: () => void;
   currentUserId: string | null;
 }) => {
-  const name = getOtherParticipantName(conversation, true); // true = isCoiffeur
-  const avatar = getOtherParticipantAvatar(conversation, true);
-  const unreadCount = conversation.coiffeur_unread_count || 0;
+  const name = getOtherParticipantName(conversation, false); // false = isClient
+  const avatar = getOtherParticipantAvatar(conversation, false);
+  const unreadCount = conversation.client_unread_count || 0;
   
   // Ne montrer en gras que si :
   // 1. Il y a des messages non lus
@@ -107,7 +106,7 @@ const EmptyState = () => (
     <Ionicons name="chatbubbles-outline" size={64} color={theme.textMuted} />
     <Text style={styles.emptyStateTitle}>Aucune conversation</Text>
     <Text style={styles.emptyStateText}>
-      Vos conversations avec les clients apparaîtront ici
+      Vos conversations avec les coiffeurs apparaîtront ici
     </Text>
   </View>
 );
@@ -118,6 +117,7 @@ const EmptyState = () => (
 export default function MessagesScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { fetchUnreadCounts } = useMessageStore();
   
   const [conversations, setConversations] = useState<ConversationWithDetails[]>([]);
   const [loading, setLoading] = useState(true);
@@ -132,24 +132,24 @@ export default function MessagesScreen() {
     getUser();
   }, []);
 
-  // Charger les conversations
   const loadConversations = useCallback(async () => {
     try {
       const data = await getMyConversations();
       setConversations(data);
+      // Rafraîchir les compteurs du store
+      fetchUnreadCounts();
     } catch (error) {
       console.error("Error loading conversations:", error);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [fetchUnreadCounts]);
 
   useEffect(() => {
     loadConversations();
   }, [loadConversations]);
 
-  // S'abonner aux mises à jour en temps réel
   useEffect(() => {
     const unsubscribe = subscribeToConversations((updatedConv) => {
       setConversations(prev => {
@@ -157,17 +157,18 @@ export default function MessagesScreen() {
         if (index >= 0) {
           const newConvs = [...prev];
           newConvs[index] = { ...newConvs[index], ...updatedConv };
-          // Trier par dernière activité
           return newConvs.sort((a, b) => 
             new Date(b.last_message_at).getTime() - new Date(a.last_message_at).getTime()
           );
         }
         return prev;
       });
+      // Rafraîchir les compteurs du store
+      fetchUnreadCounts();
     });
 
     return unsubscribe;
-  }, []);
+  }, [fetchUnreadCounts]);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
@@ -176,7 +177,7 @@ export default function MessagesScreen() {
 
   const handleConversationPress = (conversation: ConversationWithDetails) => {
     router.push({
-      pathname: "/(app)/(pro)/conversation/[id]",
+      pathname: "/(app)/(client)/conversation/[id]",
       params: { id: conversation.id }
     });
   };
@@ -228,8 +229,6 @@ const styles = StyleSheet.create({
     flex: 1, 
     backgroundColor: theme.black 
   },
-  
-  // Header
   header: { 
     backgroundColor: theme.black, 
     paddingHorizontal: 20, 
@@ -240,8 +239,6 @@ const styles = StyleSheet.create({
     fontWeight: "bold", 
     color: theme.white 
   },
-
-  // Content
   content: { 
     flex: 1, 
     backgroundColor: theme.white, 
@@ -252,15 +249,11 @@ const styles = StyleSheet.create({
     paddingTop: 8,
     paddingBottom: 100,
   },
-  
-  // Loading
   loadingContainer: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
   },
-
-  // Empty State
   emptyState: {
     flex: 1,
     justifyContent: "center",
@@ -279,8 +272,6 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginTop: 8,
   },
-
-  // Conversation Item
   conversationItem: {
     flexDirection: "row",
     alignItems: "center",

@@ -7,11 +7,9 @@ import {
   Animated,
   ViewStyle,
 } from "react-native";
-import { useRouter } from "expo-router";
+import { useRouter, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useNotificationStore } from "@/stores/notificationStore";
-import { markAllAsRead } from "@/api/notifications";
-import { useFocusEffect } from "expo-router";
 
 interface NotificationBellProps {
   size?: number;
@@ -29,34 +27,49 @@ export function NotificationBell({
   style,
 }: NotificationBellProps) {
   const router = useRouter();
-  const { unreadCount, fetchUnreadCount, resetCount } = useNotificationStore();
+  const { 
+    unreadCount, 
+    fetchUnreadCounts, 
+    lastNotification,
+  } = useNotificationStore();
   
   // État pour savoir si on affiche le nombre ou juste le point
   const [showNumber, setShowNumber] = useState(true);
   
   // Animation pour la transition
   const scaleAnim = useRef(new Animated.Value(1)).current;
+  
+  // Animation de "shake" quand une nouvelle notification arrive
+  const shakeAnim = useRef(new Animated.Value(0)).current;
 
-  // Charger le compteur au montage
+  // Charger les compteurs au montage
   useEffect(() => {
-    fetchUnreadCount();
+    fetchUnreadCounts();
   }, []);
 
-  // Re-fetch quand l'écran devient actif (retour depuis les notifications)
+  // Re-fetch quand l'écran devient actif
   useFocusEffect(
     useCallback(() => {
-      fetchUnreadCount();
+      fetchUnreadCounts();
     }, [])
   );
 
-  // Polling toutes les 5 secondes pour détecter les nouvelles notifications
+  // Animation quand une nouvelle notification arrive
   useEffect(() => {
-    const interval = setInterval(() => {
-      fetchUnreadCount();
-    }, 5000);
-
-    return () => clearInterval(interval);
-  }, []);
+    if (lastNotification) {
+      // Shake animation
+      Animated.sequence([
+        Animated.timing(shakeAnim, { toValue: 10, duration: 50, useNativeDriver: true }),
+        Animated.timing(shakeAnim, { toValue: -10, duration: 50, useNativeDriver: true }),
+        Animated.timing(shakeAnim, { toValue: 10, duration: 50, useNativeDriver: true }),
+        Animated.timing(shakeAnim, { toValue: 0, duration: 50, useNativeDriver: true }),
+      ]).start();
+      
+      // Reset showNumber pour afficher le nombre
+      setShowNumber(true);
+      scaleAnim.setValue(1);
+    }
+  }, [lastNotification]);
 
   // Timer pour passer du nombre au point après 5 secondes
   useEffect(() => {
@@ -81,7 +94,7 @@ export function NotificationBell({
     }
   }, [unreadCount, showNumber]);
 
-  // Réinitialiser quand le compteur change (nouvelle notif)
+  // Réinitialiser quand le compteur change
   useEffect(() => {
     if (unreadCount > 0) {
       setShowNumber(true);
@@ -89,13 +102,7 @@ export function NotificationBell({
     }
   }, [unreadCount]);
 
-  const handlePress = async () => {
-    // Marquer toutes les notifications comme lues
-    if (unreadCount > 0) {
-      resetCount(); // Reset immédiat pour l'UI
-      markAllAsRead(); // Appel API en arrière-plan
-    }
-    
+  const handlePress = () => {
     if (onPress) {
       onPress();
     } else {
@@ -111,7 +118,9 @@ export function NotificationBell({
       style={[styles.container, style]}
       hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
     >
-      <Ionicons name="notifications-outline" size={size} color={color} />
+      <Animated.View style={{ transform: [{ translateX: shakeAnim }] }}>
+        <Ionicons name="notifications-outline" size={size} color={color} />
+      </Animated.View>
 
       {showBadge && unreadCount > 0 && (
         <Animated.View

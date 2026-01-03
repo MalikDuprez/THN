@@ -17,6 +17,7 @@ import { getCoiffeurById, getServicesByLocation } from "@/api/coiffeurs";
 import type { CoiffeurWithDetails, Service } from "@/types/database";
 import { formatPriceShort } from "@/types/database";
 import BookingModal from "@/components/shared/BookingModal";
+import { FavoriteButton } from "@/components/shared/FavoriteButton";
 
 const { width } = Dimensions.get("window");
 
@@ -37,7 +38,6 @@ export default function CoiffeurProfileScreen() {
   const [coiffeur, setCoiffeur] = useState<CoiffeurWithDetails | null>(null);
   const [services, setServices] = useState<Service[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [isFavorite, setIsFavorite] = useState(false);
   const [showBookingModal, setShowBookingModal] = useState(false);
 
   useEffect(() => {
@@ -98,16 +98,13 @@ export default function CoiffeurProfileScreen() {
           <Ionicons name="chevron-back" size={24} color={theme.text} />
         </Pressable>
         <Text style={styles.headerTitle}>{displayName}</Text>
-        <Pressable
+        {/* ✅ FavoriteButton connecté à la BDD */}
+        <FavoriteButton 
+          type="coiffeur" 
+          itemId={id!} 
+          size={24}
           style={styles.favoriteButton}
-          onPress={() => setIsFavorite(!isFavorite)}
-        >
-          <Ionicons
-            name={isFavorite ? "heart" : "heart-outline"}
-            size={24}
-            color={isFavorite ? "#E53935" : theme.text}
-          />
-        </Pressable>
+        />
       </View>
 
       <ScrollView
@@ -243,7 +240,7 @@ const styles = StyleSheet.create({
   header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingBottom: 12, backgroundColor: theme.background },
   backButton: { width: 40, height: 40, alignItems: "center", justifyContent: "center" },
   headerTitle: { fontSize: 17, fontWeight: "600", color: theme.text },
-  favoriteButton: { width: 40, height: 40, alignItems: "center", justifyContent: "center" },
+  favoriteButton: { width: 40, height: 40, backgroundColor: "transparent" },
   
   scrollView: { flex: 1 },
   

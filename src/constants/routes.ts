@@ -64,6 +64,8 @@ export const ROUTES = {
     // Pages dynamiques
     COIFFEUR: (id: string) => `/(app)/(shared)/coiffeur/${id}` as const,
     INSPIRATION: (id: string) => `/(app)/(shared)/inspiration/${id}` as const,
+    FEEDBACK: (bookingId: string) => `/(app)/(shared)/feedback/${bookingId}` as const,
+    DISPUTE: (bookingId: string) => `/(app)/(shared)/dispute/${bookingId}` as const,
 
     // Notifications
     NOTIFICATIONS: "/(app)/(shared)/notifications",

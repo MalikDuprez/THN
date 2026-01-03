@@ -170,6 +170,7 @@ export interface Notification {
   data: NotificationData;
   actor_id: string | null;
   image_url: string | null;
+  target_role: "client" | "coiffeur" | null; // Nouveau champ
   is_read: boolean;
   read_at: string | null;
   push_sent: boolean;

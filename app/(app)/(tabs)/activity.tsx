@@ -52,7 +52,7 @@ type TabType = "active" | "upcoming" | "past";
 // ============================================
 // HELPERS
 // ============================================
-type BookingStatus = "pending" | "confirmed" | "completed" | "cancelled" | "no_show";
+type BookingStatus = "pending" | "confirmed" | "in_progress" | "completed" | "cancelled" | "no_show" | "disputed";
 
 const getBookingStatusConfig = (status: BookingStatus) => {
   switch (status) {
@@ -60,12 +60,16 @@ const getBookingStatusConfig = (status: BookingStatus) => {
       return { label: "En attente", color: theme.warning, bgColor: theme.warningLight, icon: "time-outline" };
     case "confirmed":
       return { label: "Confirmé", color: theme.success, bgColor: theme.successLight, icon: "checkmark-circle-outline" };
+    case "in_progress":
+      return { label: "En cours", color: theme.accent, bgColor: theme.accentLight, icon: "play-circle-outline" };
     case "completed":
-      return { label: "Terminé", color: theme.success, bgColor: theme.successLight, icon: "checkmark-done-outline" };
+      return { label: "Terminé", color: "#6B7280", bgColor: "#F3F4F6", icon: "checkmark-done-outline" };
     case "cancelled":
       return { label: "Annulé", color: theme.error, bgColor: theme.errorLight, icon: "close-circle-outline" };
     case "no_show":
       return { label: "Absent", color: theme.error, bgColor: theme.errorLight, icon: "alert-circle-outline" };
+    case "disputed":
+      return { label: "En litige", color: "#DC2626", bgColor: "#FEE2E2", icon: "warning-outline" };
     default:
       return { label: status, color: theme.textMuted, bgColor: theme.card, icon: "help-outline" };
   }
@@ -99,17 +103,18 @@ const formatDateShort = (dateString: string) => {
 
 // Vérifie si une réservation est "en cours" (aujourd'hui et dans les 2 prochaines heures)
 const isActiveBooking = (booking: BookingWithDetails) => {
+  // Un RDV est "actif" s'il est en cours OU s'il commence bientôt
+  if (booking.status === "in_progress") {
+    return true;
+  }
+  
   const now = new Date();
   const bookingStart = new Date(booking.start_at);
-  const bookingEnd = new Date(booking.end_at);
   
-  // En cours si : déjà commencé mais pas terminé, OU commence dans moins de 2h
+  // Commence dans moins de 2h
   const twoHoursFromNow = new Date(now.getTime() + 2 * 60 * 60 * 1000);
   
-  return (
-    (bookingStart <= now && bookingEnd >= now) || // En cours
-    (bookingStart > now && bookingStart <= twoHoursFromNow) // Commence bientôt
-  );
+  return bookingStart > now && bookingStart <= twoHoursFromNow;
 };
 
 // ============================================
